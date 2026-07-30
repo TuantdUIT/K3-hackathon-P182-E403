@@ -127,6 +127,17 @@ class StatusUpdate(BaseModel):
         return value
 
 
+class DuplicateCheckOut(BaseModel):
+    """Kết quả tra trùng cho form CRM.
+
+    `phone_match` là điều kiện CỨNG (UI chặn submit), `name_matches` là điều kiện
+    MỀM (UI chỉ cảnh báo vàng, vẫn cho tạo).
+    """
+
+    phone_match: "CustomerOut | None" = None
+    name_matches: list["CustomerOut"] = Field(default_factory=list)
+
+
 class CustomerOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -148,3 +159,8 @@ class CustomerOut(BaseModel):
     source: str
     created_at: datetime
     sales_staff: SalesStaffOut | None = None
+
+
+# `DuplicateCheckOut` khai báo trước `CustomerOut` nên phải build lại model sau khi
+# `CustomerOut` đã tồn tại, nếu không forward-ref trong annotation vẫn là chuỗi.
+DuplicateCheckOut.model_rebuild()

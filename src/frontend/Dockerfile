@@ -7,8 +7,10 @@ WORKDIR /app
 # Truyền qua `environment` của container sẽ không có tác dụng gì.
 ARG VITE_API_URL=""
 ARG VITE_AGENT_URL="/agent/test-drive"
+ARG VITE_CRM_AGENT_URL="/agent/crm-lead"
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_AGENT_URL=$VITE_AGENT_URL
+ENV VITE_CRM_AGENT_URL=$VITE_CRM_AGENT_URL
 
 COPY package.json ./
 RUN npm install

@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.backend.agents.nodes.form_nodes import ExtractedDraft
+from src.backend.agents.shared.nodes.form_nodes import ExtractedDraft
 
 
 class FakeStructuredLLM:
@@ -34,7 +34,7 @@ def fake_llm(monkeypatch):
     def install(results: list[ExtractedDraft]) -> FakeLLM:
         llm = FakeLLM(results)
         monkeypatch.setattr(
-            "src.backend.agents.nodes.form_nodes.get_llm",
+            "src.backend.agents.shared.nodes.form_nodes.get_llm",
             lambda: llm,
         )
         return llm

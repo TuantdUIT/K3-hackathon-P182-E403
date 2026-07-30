@@ -43,6 +43,17 @@ export const fetch_customers = ({ search = '', status = '' } = {}) => {
   return request(`/customers${suffix ? `?${suffix}` : ''}`);
 };
 
+/**
+ * Tra trùng cho form CRM. Trả `{ phone_match, name_matches }`.
+ * `phone_match` = trùng CỨNG (chặn submit), `name_matches` = trùng MỀM (chỉ cảnh báo).
+ */
+export const check_duplicate = ({ phone = '', name = '' } = {}) => {
+  const params = new URLSearchParams();
+  if (phone) params.set('phone', phone);
+  if (name) params.set('name', name);
+  return request(`/customers/check-duplicate?${params.toString()}`);
+};
+
 export const update_customer_status = (code, status) =>
   request(`/customers/${encodeURIComponent(code)}/status`, {
     method: 'PATCH',

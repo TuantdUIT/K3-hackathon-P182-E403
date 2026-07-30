@@ -1,3 +1,4 @@
+import { useCoAgent, useLangGraphInterrupt } from '@copilotkit/react-core';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   BatteryCharging,
@@ -9,16 +10,34 @@ import {
   Phone,
   RefreshCw,
   Search,
+  UserPlus,
   Users,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { find_vehicle } from '../data/vehicles.js';
 import { fetch_customers, login, update_customer_status } from '../lib/api.js';
 import { format_date_long, format_datetime } from '../lib/formatDate.js';
+import useAgentActionRunner from '../lib/useAgentActionRunner.js';
+import useAgentCursor from '../lib/useAgentCursor.js';
+import AddCustomerModal from './AddCustomerModal.jsx';
+import AgentApprovalCard from './AgentApprovalCard.jsx';
+import AgentCursor from './AgentCursor.jsx';
 
 const statuses = ['Mới', 'Đã liên hệ', 'Đặt lịch', 'Không phù hợp'];
+
+const empty_form = {
+  name: '',
+  phone: '',
+  email: '',
+  test_drive_date: '',
+  test_drive_time: '',
+  ward: '',
+  note: '',
+};
+
+const default_vehicle_id = 'vf8';
 
 const status_styles = {
   'Mới': 'bg-brand-100 text-brand-700 border-brand-200',
@@ -142,6 +161,33 @@ function Dashboard({ staff, on_logout }) {
   const [error_message, set_error_message] = useState('');
   const [selected, set_selected] = useState(null);
 
+  // --- State form "Thêm khách" được NÂNG LÊN Dashboard ---
+  // Agent và sales phải ghi vào cùng một chỗ; để state trong AddCustomerModal thì
+  // agent điền xong, modal unmount là mất sạch.
+  const [add_open, set_add_open] = useState(false);
+  const [form_data, set_form_data_raw] = useState(empty_form);
+  const [selected_vehicle_id, set_selected_vehicle_id] = useState(default_vehicle_id);
+  const [source, set_source] = useState('Showroom');
+  const [ward_notice, set_ward_notice] = useState('');
+  const [animation_idle, set_animation_idle] = useState(true);
+
+  const ward_select_ref = useRef(null);
+  const last_run_seq_ref = useRef(null);
+
+  const { cursor, controls } = useAgentCursor();
+
+  const { state: agent_state, setState: set_agent_state } = useCoAgent({
+    name: 'crm_lead_agent',
+    initialState: { draft: {}, status: 'idle', current_action: null, source: 'Showroom' },
+  });
+
+  const agent_status = agent_state?.status ?? 'idle';
+  const current_action = agent_state?.current_action ?? null;
+  const run_seq = agent_state?.run_seq ?? null;
+  const run_kind = agent_state?.run_kind ?? 'full';
+  const awaiting = agent_state?.awaiting ?? null;
+  const agent_submission_code = agent_state?.submission_code ?? null;
+
   const load = useCallback(async () => {
     set_loading(true);
     set_error_message('');
@@ -160,6 +206,87 @@ function Dashboard({ staff, on_logout }) {
     const timer = setTimeout(load, 250);
     return () => clearTimeout(timer);
   }, [load]);
+
+  const set_form_data = useCallback((field, value) => {
+    if (field === 'vehicle_id') {
+      set_selected_vehicle_id(value);
+      return;
+    }
+    set_form_data_raw((previous) => ({ ...previous, [field]: value }));
+  }, []);
+
+  const reset_form = useCallback(() => {
+    set_form_data_raw(empty_form);
+    set_selected_vehicle_id(default_vehicle_id);
+    set_ward_notice('');
+  }, []);
+
+  // Sales đổi ô "Nguồn" -> đồng bộ lên agent để `submit_node` ghi đúng nguồn.
+  // Ngược lại với `channel` (do node `init` của graph tự đóng dấu), `source` là
+  // lựa chọn của người dùng nên phải đi từ frontend vào.
+  const on_change_source = useCallback(
+    (value) => {
+      set_source(value);
+      set_agent_state?.((previous) => ({ ...(previous ?? {}), source: value }));
+    },
+    [set_agent_state],
+  );
+
+  // Agent bắt đầu điền -> mở form để sales nhìn thấy con trỏ làm việc.
+  useEffect(() => {
+    if (agent_status === 'filling') {
+      set_add_open(true);
+      set_animation_idle(false);
+    }
+  }, [agent_status]);
+
+  // Lượt mới dạng "full" = khách khác -> xoá sạch form.
+  // Lượt "correction" phải GIỮ NGUYÊN, vì nó chỉ điền lại vài ô đã đổi.
+  useEffect(() => {
+    if (run_seq === null || run_seq === last_run_seq_ref.current) return;
+    last_run_seq_ref.current = run_seq;
+    if (run_kind === 'full') reset_form();
+  }, [run_seq, run_kind, reset_form]);
+
+  const on_ward_needs_user = useCallback((ward_name, candidates = []) => {
+    const hint =
+      candidates.length > 1
+        ? ` Có ${candidates.length} phường/xã trùng khớp, anh/chị chọn giúp em ạ.`
+        : '';
+    set_ward_notice(
+      `Em chưa xác định chắc chắn phường/xã "${ward_name}".${hint} Anh/chị chọn lại ở ô Phường/Xã nhé.`,
+    );
+  }, []);
+
+  const on_queue_idle = useCallback(() => set_animation_idle(true), []);
+
+  useAgentActionRunner({
+    current_action,
+    controls,
+    set_form_data,
+    ward_select_ref,
+    on_ward_needs_user,
+    on_queue_idle,
+  });
+
+  // Thẻ xác nhận 2 bước render ngay trong khung chat của modal.
+  useLangGraphInterrupt({
+    render: ({ event, resolve }) => <AgentApprovalCard event={event} resolve={resolve} />,
+  });
+
+  // Agent tạo hộ thì bảng phải cập nhật ngay để dòng mới hiện ra.
+  useEffect(() => {
+    if (agent_submission_code) load();
+  }, [agent_submission_code, load]);
+
+  const find_customer_by_code = useCallback(async (code) => {
+    try {
+      const rows = await fetch_customers({ search: code });
+      return rows.find((item) => item.code === code) ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
 
   const on_change_status = async (code, status) => {
     try {
@@ -229,6 +356,10 @@ function Dashboard({ staff, on_logout }) {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <button type="button" className="btn-primary" onClick={() => set_add_open(true)}>
+              <UserPlus className="h-4 w-4" />
+              Thêm khách
+            </button>
             <button type="button" className="btn-ghost" onClick={load} disabled={loading}>
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               Tải lại
@@ -359,6 +490,29 @@ function Dashboard({ staff, on_logout }) {
         on_close={() => set_selected(null)}
         on_change_status={on_change_status}
       />
+
+      <AddCustomerModal
+        open={add_open}
+        on_close={() => set_add_open(false)}
+        form_data={form_data}
+        set_form_data={set_form_data}
+        selected_vehicle_id={selected_vehicle_id}
+        source={source}
+        set_source={on_change_source}
+        ward_notice={ward_notice}
+        set_ward_notice={set_ward_notice}
+        ward_select_ref={ward_select_ref}
+        agent_submission_code={agent_submission_code}
+        awaiting={awaiting}
+        filling={agent_status === 'filling' || !animation_idle}
+        run_seq={run_seq}
+        run_kind={run_kind}
+        on_reset={reset_form}
+        on_created={load}
+        find_customer_by_code={find_customer_by_code}
+      />
+
+      <AgentCursor cursor={cursor} />
     </div>
   );
 }

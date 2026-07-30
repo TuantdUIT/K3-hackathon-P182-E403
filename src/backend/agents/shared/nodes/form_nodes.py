@@ -16,11 +16,12 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
-from ...models.schemas import TIME_SLOTS, TestDriveCreate
-from ...services.customer_repository import create_test_drive
-from ...services.database import SessionLocal
-from ...services.llm import get_llm
+from ....models.schemas import TIME_SLOTS, TestDriveCreate
+from ....services.customer_repository import DuplicatePhoneError, create_test_drive
+from ....services.database import SessionLocal
+from ....services.llm import get_llm
 from ..catalog import match_vehicle, match_ward, normalize_phone, vehicle_name
+from ..copy import CopyPack, get_copy
 from ..state import FIELD_LABELS, FORM_FIELDS, REQUIRED_FIELDS, AgentState
 
 HOTLINE = "1900 23 23 89"
@@ -30,7 +31,9 @@ WEEKDAYS_VI = ("Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu",
 
 # Trạng thái cho biết lượt trước đã đóng — lượt sau phải bắt đầu draft sạch,
 # nếu không dữ liệu khách A rò sang phiên của khách B trên cùng thread.
-TERMINAL_STATUSES = {"done", "manual_ready", "error"}
+# `duplicate_phone` cũng là trạng thái kết thúc: sales nhắn lại số mới thì phải
+# bóc lại từ đầu, không đắp lên draft của khách đã bị từ chối.
+TERMINAL_STATUSES = {"done", "manual_ready", "error", "duplicate_phone"}
 
 TYPE_FIELDS = {"name", "phone", "email", "note"}
 SELECT_FIELDS = {"vehicle_id", "test_drive_date", "test_drive_time"}
@@ -240,14 +243,11 @@ def _describe(draft: dict[str, Any], field: str) -> str:
 # --------------------------------------------------------------------------
 
 async def extract_node(state: AgentState) -> dict[str, Any]:
+    copy = get_copy(state)
     text = _last_user_text(state)
     if not text:
         return {
-            "messages": [
-                AIMessage(
-                    content="Chào anh/chị! Anh/chị muốn lái thử mẫu xe nào, vào ngày giờ nào ạ?"
-                )
-            ],
+            "messages": [AIMessage(content=copy.greeting)],
             "status": "collecting",
             "missing_fields": list(REQUIRED_FIELDS),
         }
@@ -261,14 +261,7 @@ async def extract_node(state: AgentState) -> dict[str, Any]:
         extracted = await _extract_with_llm(text)
     except Exception:  # noqa: BLE001 - lỗi LLM không được làm sập cả graph
         return {
-            "messages": [
-                AIMessage(
-                    content=(
-                        "Xin lỗi, hệ thống đang bị nghẽn khi xử lý tin nhắn. "
-                        f"Anh/chị nhắn lại giúp em, hoặc gọi hotline {HOTLINE} ạ."
-                    )
-                )
-            ],
+            "messages": [AIMessage(content=copy.extract_failed.format(hotline=HOTLINE))],
             "status": "error",
             "error": "extract_failed",
         }
@@ -305,6 +298,7 @@ def route_after_extract(state: AgentState) -> str:
 
 async def ask_missing_node(state: AgentState) -> dict[str, Any]:
     """Hỏi GỘP một lần tất cả field bắt buộc còn thiếu, không hỏi nhỏ giọt."""
+    copy = get_copy(state)
     missing = state.get("missing_fields") or list(REQUIRED_FIELDS)
     labels = [FIELD_LABELS[field] for field in missing]
 
@@ -316,7 +310,7 @@ async def ask_missing_node(state: AgentState) -> dict[str, Any]:
     if "ward" in missing:
         hint_lines.append("Chương trình lái thử hiện chỉ áp dụng tại Hà Nội.")
 
-    content = f"Anh/chị cho em xin thêm {need} nhé."
+    content = copy.ask_missing.format(need=need)
     if hint_lines:
         content += "\n" + "\n".join(hint_lines)
 
@@ -332,6 +326,7 @@ async def ask_missing_node(state: AgentState) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 
 async def plan_node(state: AgentState) -> dict[str, Any]:
+    copy = get_copy(state)
     draft = state.get("draft") or {}
     changed = state.get("changed_fields") or []
     run_kind = "correction" if changed else "full"
@@ -368,10 +363,7 @@ async def plan_node(state: AgentState) -> dict[str, Any]:
             }
         )
 
-    if run_kind == "correction":
-        content = "Em cập nhật lại thông tin anh/chị vừa sửa ạ."
-    else:
-        content = "Em mở form và điền hộ anh/chị nhé, anh/chị theo dõi con trỏ trên màn hình ạ."
+    content = copy.plan_correction if run_kind == "correction" else copy.plan_full
 
     return {
         "messages": [AIMessage(content=content)],
@@ -428,20 +420,22 @@ def route_after_fill(state: AgentState) -> str:
 # Node: summarize
 # --------------------------------------------------------------------------
 
-def build_summary(draft: dict[str, Any]) -> str:
-    lines = ["Em đã điền xong, anh/chị kiểm tra lại giúp em ạ:"]
+def build_summary(draft: dict[str, Any], copy: CopyPack | None = None) -> str:
+    """`copy=None` mặc định về giọng trang khách — tiện cho test gọi trực tiếp."""
+    copy = copy or get_copy({})
+    lines = [copy.summary_header]
     for field in FORM_FIELDS:
         if not draft.get(field):
             continue
         lines.append(f"• {FIELD_LABELS[field]}: {_describe(draft, field)}")
     lines.append("• Tỉnh/Thành phố: Hà Nội")
     lines.append("")
-    lines.append("Thông tin trên đã đúng chưa ạ? Nếu cần sửa, anh/chị nhắn em phần cần đổi nhé.")
+    lines.append(copy.summary_footer)
     return "\n".join(lines)
 
 
 async def summarize_node(state: AgentState) -> dict[str, Any]:
-    summary = build_summary(state.get("draft") or {})
+    summary = build_summary(state.get("draft") or {}, get_copy(state))
     return {
         "messages": [AIMessage(content=summary)],
         "current_action": None,
@@ -522,8 +516,9 @@ async def confirm_details_node(state: AgentState) -> dict[str, Any]:
     answer = interrupt(
         {
             "kind": "confirm_details",
-            "summary": build_summary(state.get("draft") or {}),
+            "summary": build_summary(state.get("draft") or {}, get_copy(state)),
             "draft": state.get("draft") or {},
+            "warning": state.get("duplicate_warning") or "",
         }
     )
     text = str(answer or "")
@@ -539,10 +534,7 @@ def route_after_confirm_details(state: AgentState) -> str:
 
 
 async def ask_submit_node(state: AgentState) -> dict[str, Any]:
-    content = (
-        "Thông tin đã chính xác ạ. Anh/chị có muốn em gửi đăng ký này luôn không, "
-        "hay anh/chị tự bấm nút gửi trên form ạ?"
-    )
+    content = get_copy(state).ask_submit
     return {
         "messages": [AIMessage(content=content)],
         "status": "awaiting_submit",
@@ -667,14 +659,14 @@ def direct_captures(text: str) -> dict[str, Any]:
 
 
 async def patch_node(state: AgentState) -> dict[str, Any]:
+    copy = get_copy(state)
     rounds = int(state.get("correction_rounds") or 0) + 1
     old_draft = dict(state.get("draft") or {})
     text = (state.get("query") or "").strip()
 
     if rounds > MAX_CORRECTION_ROUNDS:
-        content = (
-            f"Em đã sửa {MAX_CORRECTION_ROUNDS} lần mà vẫn chưa khớp ý anh/chị, xin lỗi anh/chị ạ. "
-            f"Anh/chị gọi hotline {HOTLINE} để nhân viên hỗ trợ trực tiếp giúp em nhé."
+        content = copy.patch_exhausted.format(
+            rounds=MAX_CORRECTION_ROUNDS, hotline=HOTLINE
         )
         return {
             "messages": [AIMessage(content=content)],
@@ -705,10 +697,7 @@ async def patch_node(state: AgentState) -> dict[str, Any]:
     changed = [f for f in FORM_FIELDS if new_draft.get(f) != old_draft.get(f)]
 
     if not changed:
-        content = (
-            "Em chưa rõ anh/chị muốn sửa phần nào ạ. Anh/chị nhắn cụ thể giúp em, "
-            'ví dụ "đổi giờ thành 15:00" hoặc "đổi xe sang VF 9" nhé.'
-        )
+        content = copy.patch_unclear
         return {
             "messages": [AIMessage(content=content)],
             "draft": new_draft,
@@ -719,7 +708,7 @@ async def patch_node(state: AgentState) -> dict[str, Any]:
         }
 
     labels = ", ".join(FIELD_LABELS[field] for field in changed)
-    content = f"Em sửa lại {labels} ạ."
+    content = copy.patch_applied.format(labels=labels)
 
     return {
         "messages": [AIMessage(content=content)],
@@ -751,6 +740,7 @@ def _persist(payload: TestDriveCreate) -> str:
 
 
 async def submit_node(state: AgentState) -> dict[str, Any]:
+    copy = get_copy(state)
     draft = state.get("draft") or {}
 
     try:
@@ -765,13 +755,10 @@ async def submit_node(state: AgentState) -> dict[str, Any]:
             province="Hà Nội",
             ward=draft["ward"],
             note=draft.get("note"),
-            source="Website",
+            source=state.get("source") or "Website",
         )
     except (KeyError, ValueError) as exc:
-        content = (
-            "Thông tin chưa hợp lệ nên em chưa gửi được đăng ký ạ: "
-            f"{exc}. Anh/chị kiểm tra lại giúp em nhé."
-        )
+        content = copy.submit_invalid.format(error=exc)
         return {
             "messages": [AIMessage(content=content)],
             "status": "error",
@@ -781,11 +768,21 @@ async def submit_node(state: AgentState) -> dict[str, Any]:
 
     try:
         code = await asyncio.to_thread(_persist, payload)
-    except Exception:  # noqa: BLE001
-        content = (
-            "Em gửi đăng ký không thành công do lỗi hệ thống ạ. "
-            f"Anh/chị bấm nút gửi trên form hoặc gọi hotline {HOTLINE} giúp em nhé."
+    except DuplicatePhoneError as exc:
+        # Chốt chặn CUỐI. Graph CRM đã kiểm ở `check_duplicate` trước khi hỏi xác
+        # nhận, nhưng giữa lúc đó và lúc ghi có thể có sales khác vừa tạo cùng số.
+        # Bắt ở đây để exception không xé graph giữa chừng.
+        content = copy.duplicate_phone.format(
+            code=exc.code, name=exc.name, phone=payload.phone, hotline=HOTLINE
         )
+        return {
+            "messages": [AIMessage(content=content)],
+            "status": "duplicate_phone",
+            "error": "duplicate_phone",
+            "response": content,
+        }
+    except Exception:  # noqa: BLE001
+        content = copy.submit_failed.format(hotline=HOTLINE)
         return {
             "messages": [AIMessage(content=content)],
             "status": "error",
@@ -797,11 +794,8 @@ async def submit_node(state: AgentState) -> dict[str, Any]:
 
 
 async def manual_ready_node(state: AgentState) -> dict[str, Any]:
-    """Không tạo bản ghi, giữ nguyên form đã điền cho khách tự bấm gửi."""
-    content = (
-        "Vâng, em giữ nguyên thông tin đã điền trên form ạ. "
-        'Anh/chị kiểm tra lần cuối rồi bấm "Đăng ký lái thử" giúp em nhé.'
-    )
+    """Không tạo bản ghi, giữ nguyên form đã điền cho người dùng tự bấm gửi."""
+    content = get_copy(state).manual_ready
     return {
         "messages": [AIMessage(content=content)],
         "current_action": None,
@@ -814,11 +808,13 @@ async def report_node(state: AgentState) -> dict[str, Any]:
     draft = state.get("draft") or {}
     code = state.get("submission_code") or ""
 
-    content = (
-        f"Em đã gửi đăng ký thành công ạ! Mã đăng ký của anh/chị là {code}.\n"
-        f"Lịch hẹn: {_describe(draft, 'test_drive_date')} lúc {draft.get('test_drive_time')}, "
-        f"mẫu xe {vehicle_name(draft.get('vehicle_id')) or ''} tại {draft.get('ward')}, Hà Nội.\n"
-        f"Nhân viên kinh doanh sẽ gọi xác nhận trước buổi hẹn. Cần đổi lịch, anh/chị gọi hotline {HOTLINE} ạ."
+    content = get_copy(state).report.format(
+        code=code,
+        date=_describe(draft, "test_drive_date"),
+        time=draft.get("test_drive_time"),
+        vehicle=vehicle_name(draft.get("vehicle_id")) or "",
+        ward=draft.get("ward"),
+        hotline=HOTLINE,
     )
     return {
         "messages": [AIMessage(content=content)],

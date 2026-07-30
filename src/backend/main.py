@@ -8,7 +8,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .agents.graph import form_agent
+from .agents.crm_lead import graph as crm_lead_graph
+from .agents.test_drive import graph as test_drive_graph
 from .api.routes import router
 from .config import get_settings
 from .services.database import init_db
@@ -124,7 +125,7 @@ def create_app() -> FastAPI:
 
 
 def _mount_agent_endpoint(app: FastAPI) -> None:
-    """Phơi graph theo giao thức AG-UI.
+    """Phơi 2 graph theo giao thức AG-UI.
 
     BẪY #2 — nối THẲNG AG-UI, KHÔNG dùng `CopilotKitRemoteEndpoint`.
     `CopilotKitRemoteEndpoint` nói giao thức remote-endpoint v1, cần thêm một
@@ -132,21 +133,29 @@ def _mount_agent_endpoint(app: FastAPI) -> None:
     1.63 trên trình duyệt nói v2 và tự đọc được AG-UI. Cắm trực tiếp thì bỏ hẳn
     được tiến trình Node trung gian, và mọi state-delta của graph ra tới
     frontend nguyên vẹn.
+
+    Tên agent phải khớp CHÍNH XÁC với key trong `agents__unsafe_dev_only` ở
+    `main.jsx` và tham số của `useCoAgent`. Lệch một ký tự thì chat im lặng,
+    không báo lỗi ở đâu cả.
     """
     try:
         from ag_ui_langgraph import LangGraphAgent, add_langgraph_fastapi_endpoint
     except ImportError:  # pragma: no cover
         logger.warning(
-            "Chưa cài ag-ui-langgraph nên bỏ qua endpoint /agent/test-drive. "
+            "Chưa cài ag-ui-langgraph nên bỏ qua các endpoint /agent/*. "
             "Chạy: pip install -r requirements.txt"
         )
         return
 
-    add_langgraph_fastapi_endpoint(
-        app,
-        LangGraphAgent(name="test_drive_agent", graph=form_agent),
-        "/agent/test-drive",
-    )
+    for module, path in (
+        (test_drive_graph, "/agent/test-drive"),
+        (crm_lead_graph, "/agent/crm-lead"),
+    ):
+        add_langgraph_fastapi_endpoint(
+            app,
+            LangGraphAgent(name=module.AGENT_NAME, graph=module.agent),
+            path,
+        )
 
 
 app = create_app()

@@ -14,6 +14,9 @@ from typing_extensions import TypedDict
 
 RunKind = Literal["full", "correction"]
 
+# "web" = khách tự đăng ký trên trang showcase; "crm" = sales nhập hộ trong Admin Portal.
+Channel = Literal["web", "crm"]
+
 # Các field của form theo đúng thứ tự con trỏ sẽ đi qua.
 FORM_FIELDS: tuple[str, ...] = (
     "name",
@@ -50,6 +53,15 @@ FIELD_LABELS: dict[str, str] = {
 class AgentState(TypedDict, total=False):
     messages: Annotated[list[Any], add_messages]
 
+    # Agent nào đang chạy. Do node `init` của từng graph tự đóng dấu, KHÔNG nhờ
+    # frontend set — quên một lần là agent CRM nói giọng dành cho khách.
+    channel: Channel
+
+    # Nguồn lead ghi vào DB. Ngược lại với `channel`: sales chọn được trên form
+    # nên frontend set qua `setState`. Cả hai đều là field TOP-LEVEL, không nằm
+    # trong `draft`/`FORM_FIELDS`, kẻo `plan_node` sinh action điền ô không có thật.
+    source: str
+
     # Dữ liệu form đang gom
     draft: dict[str, Any]
     missing_fields: list[str]
@@ -69,6 +81,10 @@ class AgentState(TypedDict, total=False):
     changed_fields: list[str]
     correction_rounds: int
 
+    # Cảnh báo MỀM kèm theo thẻ xác nhận (hiện tại: trùng họ tên khách). Chuỗi rỗng
+    # nghĩa là không có gì để cảnh báo — trùng CỨNG (số điện thoại) không đi tới đây.
+    duplicate_warning: str
+
     # Kết quả
     submission_code: str | None
     status: str
@@ -82,6 +98,8 @@ class AgentState(TypedDict, total=False):
 def empty_state() -> AgentState:
     return AgentState(
         messages=[],
+        channel="web",
+        source="Website",
         draft={},
         missing_fields=[],
         action_queue=[],
@@ -92,6 +110,7 @@ def empty_state() -> AgentState:
         awaiting=None,
         changed_fields=[],
         correction_rounds=0,
+        duplicate_warning="",
         submission_code=None,
         status="idle",
         query=None,

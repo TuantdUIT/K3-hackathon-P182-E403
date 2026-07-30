@@ -10,14 +10,14 @@ from pathlib import Path
 
 import pytest
 
-from src.backend.agents.catalog import (
+from src.backend.agents.shared.catalog import (
     VEHICLES,
     match_vehicle,
     match_ward,
     normalize_phone,
     strip_accents,
 )
-from src.backend.agents.wards import HANOI_WARDS
+from src.backend.agents.shared.wards import HANOI_WARDS
 
 ROOT = Path(__file__).resolve().parents[2]
 VEHICLES_JS = ROOT / "src" / "frontend" / "src" / "data" / "vehicles.js"

@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from src.backend.agents.nodes.form_nodes import (
+from src.backend.agents.shared.nodes.form_nodes import (
     MAX_CORRECTION_ROUNDS,
     ExtractedDraft,
     ask_missing_node,
@@ -22,7 +22,7 @@ from src.backend.agents.nodes.form_nodes import (
     route_after_plan,
     summarize_node,
 )
-from src.backend.agents.state import FORM_FIELDS, empty_state
+from src.backend.agents.shared.state import FORM_FIELDS, empty_state
 
 TOMORROW = (date.today() + timedelta(days=1)).isoformat()
 NEXT_WEEK = (date.today() + timedelta(days=7)).isoformat()
@@ -126,7 +126,7 @@ class TestExtract:
         async def boom(_text):
             raise RuntimeError("openai down")
 
-        monkeypatch.setattr("src.backend.agents.nodes.form_nodes._extract_with_llm", boom)
+        monkeypatch.setattr("src.backend.agents.shared.nodes.form_nodes._extract_with_llm", boom)
 
         result = await extract_node(state_with(query="Tôi là Nam"))
 
@@ -447,7 +447,7 @@ class TestPatch:
         async def boom(_text):
             raise RuntimeError("openai down")
 
-        monkeypatch.setattr("src.backend.agents.nodes.form_nodes._extract_with_llm", boom)
+        monkeypatch.setattr("src.backend.agents.shared.nodes.form_nodes._extract_with_llm", boom)
 
         result = await patch_node(state_with(draft=dict(FULL_DRAFT), query="đổi giờ thành 15:00"))
 
@@ -471,6 +471,6 @@ class TestAgentSpeaksThroughMessages:
 
 
 def test_form_fields_cover_every_label():
-    from src.backend.agents.state import FIELD_LABELS
+    from src.backend.agents.shared.state import FIELD_LABELS
 
     assert set(FORM_FIELDS) == set(FIELD_LABELS)

@@ -1,19 +1,21 @@
-"""Lắp graph điền form lái thử.
+"""Graph agent CRM — sales nhập lead hộ khách trong Admin Portal.
 
-START -> extract
-extract -> ask_missing -> END            (còn field bắt buộc bị thiếu)
-extract -> plan -> fill (tự lặp) -> summarize -> confirm_details
-confirm_details -> patch -> plan          (khách muốn sửa)
-confirm_details -> ask_submit -> confirm_submit
-confirm_submit -> submit -> report -> END (khách cho gửi hộ)
-confirm_submit -> manual_ready -> END     (khách tự bấm gửi)
-patch -> END                              (quá 5 vòng sửa)
+Giống graph lái thử, KHÁC ĐÚNG MỘT CHỖ: chèn `check_duplicate` giữa `summarize`
+và `confirm_details`.
+
+START -> init -> extract
+extract -> ask_missing -> END
+extract -> plan -> fill (tự lặp) -> summarize -> check_duplicate
+check_duplicate -> duplicate_blocked -> END   (trùng SĐT: chặn cứng)
+check_duplicate -> confirm_details            (sạch, hoặc chỉ trùng tên)
+confirm_details -> patch -> plan | ask_submit -> confirm_submit
+confirm_submit -> submit -> report -> END | manual_ready -> END
 """
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from .nodes.form_nodes import (
+from ..shared.nodes.form_nodes import (
     ask_missing_node,
     ask_submit_node,
     confirm_details_node,
@@ -33,17 +35,29 @@ from .nodes.form_nodes import (
     submit_node,
     summarize_node,
 )
-from .state import AgentState
+from ..shared.nodes.init_node import make_init_node
+from ..shared.state import AgentState
+from .nodes import (
+    check_duplicate_node,
+    duplicate_blocked_node,
+    route_after_check_duplicate,
+)
+
+CHANNEL = "crm"
+AGENT_NAME = "crm_lead_agent"
 
 
-def build_form_graph(*, checkpointer=None):
+def build_graph(*, checkpointer=None):
     builder = StateGraph(AgentState)
 
+    builder.add_node("init", make_init_node(CHANNEL))
     builder.add_node("extract", extract_node)
     builder.add_node("ask_missing", ask_missing_node)
     builder.add_node("plan", plan_node)
     builder.add_node("fill", fill_node)
     builder.add_node("summarize", summarize_node)
+    builder.add_node("check_duplicate", check_duplicate_node)
+    builder.add_node("duplicate_blocked", duplicate_blocked_node)
     builder.add_node("confirm_details", confirm_details_node)
     builder.add_node("patch", patch_node)
     builder.add_node("ask_submit", ask_submit_node)
@@ -52,7 +66,8 @@ def build_form_graph(*, checkpointer=None):
     builder.add_node("manual_ready", manual_ready_node)
     builder.add_node("report", report_node)
 
-    builder.add_edge(START, "extract")
+    builder.add_edge(START, "init")
+    builder.add_edge("init", "extract")
 
     builder.add_conditional_edges(
         "extract",
@@ -61,17 +76,22 @@ def build_form_graph(*, checkpointer=None):
     )
     builder.add_edge("ask_missing", END)
 
-    # Queue rỗng thì bỏ qua fill — xảy ra ở lượt sửa mà không field nào đổi.
     builder.add_conditional_edges(
         "plan", route_after_plan, {"fill": "fill", "summarize": "summarize"}
     )
-
-    # fill tự lặp: mỗi vòng pop 1 action để frontend nhận từng state-delta.
     builder.add_conditional_edges(
         "fill", route_after_fill, {"fill": "fill", "summarize": "summarize"}
     )
 
-    builder.add_edge("summarize", "confirm_details")
+    # Chỗ duy nhất khác graph lái thử.
+    builder.add_edge("summarize", "check_duplicate")
+    builder.add_conditional_edges(
+        "check_duplicate",
+        route_after_check_duplicate,
+        {"duplicate_blocked": "duplicate_blocked", "confirm_details": "confirm_details"},
+    )
+    builder.add_edge("duplicate_blocked", END)
+
     builder.add_conditional_edges(
         "confirm_details",
         route_after_confirm_details,
@@ -91,9 +111,7 @@ def build_form_graph(*, checkpointer=None):
     builder.add_edge("report", END)
     builder.add_edge("manual_ready", END)
 
-    # MemorySaver là bắt buộc: interrupt() cần checkpointer để đóng băng state,
-    # frontend resume bằng cùng thread_id.
     return builder.compile(checkpointer=checkpointer or MemorySaver())
 
 
-form_agent = build_form_graph()
+agent = build_graph()

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from ..models.schemas import (
     CustomerOut,
+    DuplicateCheckOut,
     LoginRequest,
     LoginResponse,
     SalesStaffOut,
@@ -12,6 +13,7 @@ from ..models.schemas import (
     TestDriveCreate,
 )
 from ..services import customer_repository as repo
+from ..services.customer_repository import DuplicatePhoneError
 from ..services.database import get_session
 from ..services.security import verify_password
 
@@ -36,8 +38,32 @@ def login(payload: LoginRequest, session: Session = Depends(get_session)) -> Log
 def create_test_drive(
     payload: TestDriveCreate, session: Session = Depends(get_session)
 ) -> CustomerOut:
-    customer = repo.create_test_drive(session, payload)
+    try:
+        customer = repo.create_test_drive(session, payload)
+    except DuplicatePhoneError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Số điện thoại đã đăng ký cho khách {exc.code} — {exc.name}. "
+                "Vui lòng kiểm tra lại."
+            ),
+        ) from exc
     return CustomerOut.model_validate(customer)
+
+
+# PHẢI khai báo TRƯỚC "/customers/{code}/status": FastAPI match theo thứ tự đăng ký,
+# để sau thì "check-duplicate" bị hiểu là giá trị của {code}.
+@router.get("/customers/check-duplicate", response_model=DuplicateCheckOut)
+def check_duplicate(
+    phone: str | None = Query(default=None),
+    name: str | None = Query(default=None),
+    session: Session = Depends(get_session),
+) -> DuplicateCheckOut:
+    phone_match, name_matches = repo.find_duplicates(session, phone=phone, name=name)
+    return DuplicateCheckOut(
+        phone_match=CustomerOut.model_validate(phone_match) if phone_match else None,
+        name_matches=[CustomerOut.model_validate(c) for c in name_matches],
+    )
 
 
 @router.get("/customers", response_model=list[CustomerOut])

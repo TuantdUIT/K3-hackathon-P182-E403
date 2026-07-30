@@ -1,0 +1,16 @@
+INFO:     Started server process [9104]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+F:\NAM3\NCKH_AI_Action\AI_in_Action\P-182-hackathons-2-days\.venv\Lib\site-packages\pydantic\main.py:475: UserWarning: Pydantic serializer warnings:
+  PydanticSerializationUnexpectedValue(Expected `none` - serialized value may not be as expected [field_name='parsed', input_value=ExtractedDraft(name='Minh...oàn Ki\u1ebfm', note=None), input_type=ExtractedDraft])
+  return self.__pydantic_serializer__.to_python(
+F:\NAM3\NCKH_AI_Action\AI_in_Action\P-182-hackathons-2-days\.venv\Lib\site-packages\pydantic\main.py:475: UserWarning: Pydantic serializer warnings:
+  PydanticSerializationUnexpectedValue(Expected `none` - serialized value may not be as expected [field_name='parsed', input_value=ExtractedDraft(name='Ph...oàn Ki\u1ebfm', note=None), input_type=ExtractedDraft])
+  return self.__pydantic_serializer__.to_python(
+F:\NAM3\NCKH_AI_Action\AI_in_Action\P-182-hackathons-2-days\.venv\Lib\site-packages\pydantic\main.py:475: UserWarning: Pydantic serializer warnings:
+  PydanticSerializationUnexpectedValue(Expected `none` - serialized value may not be as expected [field_name='parsed', input_value=ExtractedDraft(name='Ph...oàn Ki\u1ebfm', note=None), input_type=ExtractedDraft])
+  return self.__pydantic_serializer__.to_python(
+F:\NAM3\NCKH_AI_Action\AI_in_Action\P-182-hackathons-2-days\.venv\Lib\site-packages\pydantic\main.py:475: UserWarning: Pydantic serializer warnings:
+  PydanticSerializationUnexpectedValue(Expected `none` - serialized value may not be as expected [field_name='parsed', input_value=ExtractedDraft(name='Pham...='Hoan Kiem', note=None), input_type=ExtractedDraft])
+  return self.__pydantic_serializer__.to_python(

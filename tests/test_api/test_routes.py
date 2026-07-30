@@ -160,6 +160,91 @@ class TestCreateTestDrive:
         assert body["phone"] == "0987654321"
 
 
+class TestDuplicatePhoneIsBlocked:
+    """Trùng SĐT = chặn CỨNG. Luật nằm ở repository nên phủ cả form khách, form
+    CRM và agent — ở đây kiểm qua đường HTTP."""
+
+    def test_duplicate_phone_returns_409_with_existing_code(self, client):
+        first = client.post("/api/v1/test-drives", json=valid_payload()).json()
+
+        response = client.post(
+            "/api/v1/test-drives", json=valid_payload(name="Người Khác", source="Showroom")
+        )
+
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert first["code"] in detail
+        assert "Trần Văn A" in detail
+
+    def test_duplicate_phone_in_another_format_is_still_blocked(self, client):
+        client.post("/api/v1/test-drives", json=valid_payload(phone="0987654321"))
+
+        response = client.post(
+            "/api/v1/test-drives", json=valid_payload(phone="098 765 4321")
+        )
+
+        assert response.status_code == 409
+
+    def test_duplicate_name_is_allowed(self, client):
+        client.post("/api/v1/test-drives", json=valid_payload(name="Trần Văn A"))
+
+        response = client.post(
+            "/api/v1/test-drives",
+            json=valid_payload(name="Trần Văn A", phone="0912345678"),
+        )
+
+        assert response.status_code == 201
+
+
+class TestCheckDuplicate:
+    @pytest.fixture
+    def seeded(self, client):
+        return client.post(
+            "/api/v1/test-drives", json=valid_payload(name="Trần Văn Tuấn")
+        ).json()
+
+    def test_finds_phone_match(self, client, seeded):
+        body = client.get(
+            "/api/v1/customers/check-duplicate", params={"phone": "0987 654 321"}
+        ).json()
+
+        assert body["phone_match"]["code"] == seeded["code"]
+        assert body["name_matches"] == []
+
+    def test_finds_name_match_ignoring_accents(self, client, seeded):
+        body = client.get(
+            "/api/v1/customers/check-duplicate", params={"name": "tran van tuan"}
+        ).json()
+
+        assert body["phone_match"] is None
+        assert [item["code"] for item in body["name_matches"]] == [seeded["code"]]
+
+    def test_reports_nothing_for_a_new_customer(self, client, seeded):
+        body = client.get(
+            "/api/v1/customers/check-duplicate",
+            params={"phone": "0912345678", "name": "Người Mới"},
+        ).json()
+
+        assert body["phone_match"] is None
+        assert body["name_matches"] == []
+
+    def test_no_params_is_not_an_error(self, client, seeded):
+        response = client.get("/api/v1/customers/check-duplicate")
+
+        assert response.status_code == 200
+        assert response.json() == {"phone_match": None, "name_matches": []}
+
+    def test_does_not_shadow_the_status_route(self, client, seeded):
+        """`check-duplicate` khai báo trước `/customers/{code}/status` — route cũ
+        phải còn nguyên tác dụng, không bị hiểu thành {code}."""
+        response = client.patch(
+            f"/api/v1/customers/{seeded['code']}/status", json={"status": "Đã liên hệ"}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "Đã liên hệ"
+
+
 class TestListCustomers:
     @pytest.fixture
     def seeded(self, client):
