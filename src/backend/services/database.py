@@ -9,6 +9,7 @@ from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import get_settings
+from .appraisal_repository import seed_used_car_prices
 from .security import hash_password
 from .tables import Base, Customer, SalesStaff, build_customer_code
 
@@ -130,8 +131,15 @@ def seed_demo_customers(session: Session) -> int:
 
 
 def init_db() -> None:
-    """Tạo bảng + seed nhân viên. Gọi được nhiều lần, không hỏng dữ liệu cũ."""
+    """Tạo bảng + seed nhân viên và bảng giá xe cũ.
+
+    Gọi được nhiều lần, không hỏng dữ liệu cũ. Bảng giá xe cũ PHẢI seed lúc khởi
+    động (khác `seed_demo_customers`): rỗng thì nghiệp vụ định giá đứng im vì
+    không có vế trái cho công thức A, mà đó không phải dữ liệu giả — nó là danh
+    mục tra cứu.
+    """
     _ensure_sqlite_dir(get_settings().database_url)
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as session:
         seed_sales_staff(session)
+        seed_used_car_prices(session)

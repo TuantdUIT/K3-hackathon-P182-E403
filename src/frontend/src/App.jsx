@@ -30,7 +30,9 @@ const empty_form = {
 const default_vehicle_id = 'vf8';
 
 export default function App() {
-  if (window.location.pathname === '/admin-portal') {
+  // `startsWith` chứ không phải `===`: Admin Portal có nhiều tab, mỗi tab một
+  // đường dẫn con (`/admin-portal/dinh-gia`).
+  if (window.location.pathname.startsWith('/admin-portal')) {
     return <AdminPortal />;
   }
   return <Showcase />;

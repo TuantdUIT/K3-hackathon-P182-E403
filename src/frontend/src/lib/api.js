@@ -61,3 +61,38 @@ export const update_customer_status = (code, status) =>
   });
 
 export const fetch_sales_staff = () => request('/sales-staff');
+
+// --- Nghiệp vụ 2: định giá xe cũ ---
+
+/** 8 tiêu chí + trọng số. Nguồn sự thật ở backend, UI không hardcode lại. */
+export const fetch_criteria = () => request('/appraisals/criteria');
+
+/** Danh mục xe cũ tra được giá — ngoài danh sách này phải thẩm định thủ công. */
+export const fetch_used_car_models = () => request('/appraisals/used-car-models');
+
+export const fetch_appraisals = (customer_code = '') => {
+  const params = new URLSearchParams();
+  if (customer_code) params.set('customer_code', customer_code);
+  const suffix = params.toString();
+  return request(`/appraisals${suffix ? `?${suffix}` : ''}`);
+};
+
+/** Chạy thử cổng loại trừ mà KHÔNG ghi hồ sơ — để form hiện đèn xanh/đỏ ngay. */
+export const preview_eligibility = (payload) =>
+  request('/appraisals/eligibility', { method: 'POST', body: JSON.stringify(payload) });
+
+export const create_appraisal = (payload) =>
+  request('/appraisals', { method: 'POST', body: JSON.stringify(payload) });
+
+export const create_quote = (code, vehicle_id) =>
+  request(`/appraisals/${encodeURIComponent(code)}/quotes`, {
+    method: 'POST',
+    body: JSON.stringify({ vehicle_id }),
+  });
+
+/** Chặn MỀM: thiếu mục vẫn trả 200, hồ sơ về trạng thái `blocked`. */
+export const update_checklist = (code, done, handover_date = null) =>
+  request(`/appraisals/${encodeURIComponent(code)}/checklist`, {
+    method: 'PATCH',
+    body: JSON.stringify({ done, handover_date }),
+  });

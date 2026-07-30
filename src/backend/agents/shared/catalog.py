@@ -32,6 +32,34 @@ VEHICLES: tuple[tuple[str, str], ...] = (
 
 VEHICLE_NAME_BY_ID: dict[str, str] = dict(VEHICLES)
 
+# (giá niêm yết, giá ưu đãi) — khớp `priceList` / `priceFrom` trong vehicles.js.
+# Nghiệp vụ đổi xe cần cả hai ở backend: `priceList` là "Giá niêm yết xe mới" của
+# bước 2, còn hiệu `priceList - priceFrom` chính là "Khuyến mãi xe mới" ở bước 3.
+# `test_catalog.py` đọc file JS để so, nên sửa giá một bên là test đỏ ngay.
+VEHICLE_PRICES: dict[str, tuple[int, int]] = {
+    "vf2": (379_000_000, 359_000_000),
+    "vf3": (322_000_000, 299_000_000),
+    "vf5": (559_000_000, 529_000_000),
+    "vf6": (729_000_000, 689_000_000),
+    "vf7": (850_000_000, 799_000_000),
+    "vf8": (1_089_000_000, 1_019_000_000),
+    "vf8-allnew": (1_179_000_000, 1_099_000_000),
+    "vfmpv7": (799_000_000, 749_000_000),
+    "vf9": (1_591_000_000, 1_499_000_000),
+    "minio-green": (285_000_000, 269_000_000),
+    "herio-green": (526_000_000, 499_000_000),
+    "nerio-green": (483_000_000, 459_000_000),
+    "limo-green": (789_000_000, 749_000_000),
+    "ec-van": (299_000_000, 285_000_000),
+}
+
+
+def vehicle_price(vehicle_id: str | None) -> tuple[int, int] | None:
+    """(giá niêm yết, giá ưu đãi). None nếu không có xe trong danh mục."""
+    if not vehicle_id:
+        return None
+    return VEHICLE_PRICES.get(vehicle_id)
+
 # Cách khách hay gọi mà không suy ra được từ tên chính thức.
 VEHICLE_ALIASES: dict[str, str] = {
     "vf8allnew": "vf8-allnew",
@@ -62,6 +90,15 @@ def strip_accents(text: str) -> str:
 def _squash(text: str) -> str:
     """Bỏ dấu rồi bỏ luôn mọi ký tự không phải chữ/số: "VF 8" -> "vf8"."""
     return re.sub(r"[^a-z0-9]", "", strip_accents(text))
+
+
+def squash(text: str) -> str:
+    """Bản public của `_squash`, cho module ngoài dùng chung một quy tắc chuẩn hoá.
+
+    Bảng giá xe cũ sinh `lookup_key` bằng đúng hàm này. Viết hàm bỏ dấu thứ hai
+    ở nơi khác là hai bộ quy tắc sẽ trôi khỏi nhau, và tra giá trượt trong im lặng.
+    """
+    return _squash(text)
 
 
 _VEHICLE_KEYS: dict[str, str] = {}

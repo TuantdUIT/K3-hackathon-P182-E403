@@ -2,6 +2,7 @@ import { useCoAgent, useLangGraphInterrupt } from '@copilotkit/react-core';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   BatteryCharging,
+  Car,
   LayoutDashboard,
   Loader2,
   LogOut,
@@ -24,6 +25,17 @@ import useAgentCursor from '../lib/useAgentCursor.js';
 import AddCustomerModal from './AddCustomerModal.jsx';
 import AgentApprovalCard from './AgentApprovalCard.jsx';
 import AgentCursor from './AgentCursor.jsx';
+import AppraisalBoard from './AppraisalBoard.jsx';
+
+// Mỗi tab là một ĐƯỜNG DẪN RIÊNG, chuyển tab bằng full page load chứ không phải
+// state trong React. Lý do: `CopilotKit` ở `main.jsx` chọn agent theo
+// `window.location.pathname` và chỉ có MỘT agent hoạt động mỗi lần mount. Đổi
+// tab bằng state thì khung chat vẫn dính agent của tab cũ.
+// Phiên đăng nhập nằm ở `sessionStorage` nên reload không bắt đăng nhập lại.
+export const TABS = [
+  { key: 'customers', path: '/admin-portal', label: 'Khách đăng ký lái thử', icon: LayoutDashboard },
+  { key: 'appraisal', path: '/admin-portal/dinh-gia', label: 'Định giá xe cũ', icon: Car },
+];
 
 const statuses = ['Mới', 'Đã liên hệ', 'Đặt lịch', 'Không phù hợp'];
 
@@ -69,7 +81,115 @@ export default function AdminPortal() {
   };
 
   if (!staff) return <LoginScreen on_logged_in={on_logged_in} />;
+
+  if (window.location.pathname.startsWith('/admin-portal/dinh-gia')) {
+    return (
+      <Shell staff={staff} on_logout={on_logout} active="appraisal" title="Định giá xe cũ"
+        subtitle={`Xin chào ${staff.name} — nghiệp vụ đổi xe cũ lấy xe điện VinFast.`}>
+        <AppraisalBoard staff={staff} />
+      </Shell>
+    );
+  }
+
   return <Dashboard staff={staff} on_logout={on_logout} />;
+}
+
+/**
+ * Khung chung của CRM: sidebar điều hướng + thẻ nhân viên, phần thân do tab tự lo.
+ */
+function Shell({ staff, on_logout, active, title, subtitle, actions, children }) {
+  return (
+    <div className="flex min-h-screen bg-slate-100">
+      <aside className="hidden w-60 shrink-0 flex-col bg-ink-900 p-5 text-slate-300 lg:flex">
+        <div className="flex items-center gap-2.5 text-white">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600">
+            <BatteryCharging className="h-5 w-5" />
+          </span>
+          <span className="font-extrabold">VinFast CRM</span>
+        </div>
+
+        <nav className="mt-8 space-y-1 text-sm">
+          {TABS.map((tab) => {
+            const Icon = tab.icon;
+            const current = tab.key === active;
+            return (
+              <a
+                key={tab.key}
+                href={tab.path}
+                className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 transition ${
+                  current
+                    ? 'bg-white/10 font-semibold text-white'
+                    : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                {tab.label}
+              </a>
+            );
+          })}
+          <span className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-slate-500">
+            <Users className="h-4 w-4" />
+            Nhân viên kinh doanh
+          </span>
+        </nav>
+
+        <div className="mt-auto rounded-2xl bg-white/5 p-4">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-9 w-9 place-items-center rounded-full bg-brand-500 text-sm font-bold text-white">
+              {staff.initials}
+            </span>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-white">{staff.name}</div>
+              <div className="truncate text-xs text-slate-400">{staff.email}</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={on_logout}
+            className="mt-3.5 flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
+          >
+            <LogOut className="h-4 w-4" />
+            Đăng xuất
+          </button>
+        </div>
+      </aside>
+
+      <main className="min-w-0 flex-1 p-5 sm:p-7">
+        <header className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold">{title}</h1>
+            <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {actions}
+            <button type="button" className="btn-ghost lg:hidden" onClick={on_logout}>
+              <LogOut className="h-4 w-4" />
+              Đăng xuất
+            </button>
+          </div>
+        </header>
+
+        {/* Tab nằm ngang cho màn hình nhỏ — sidebar bị ẩn dưới breakpoint lg. */}
+        <nav className="mt-4 flex gap-2 lg:hidden">
+          {TABS.map((tab) => (
+            <a
+              key={tab.key}
+              href={tab.path}
+              className={`rounded-xl px-3.5 py-2 text-sm font-semibold transition ${
+                tab.key === active
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {tab.label}
+            </a>
+          ))}
+        </nav>
+
+        <div className="mt-5">{children}</div>
+      </main>
+    </div>
+  );
 }
 
 function LoginScreen({ on_logged_in }) {
@@ -306,56 +426,15 @@ function Dashboard({ staff, on_logout }) {
   }));
 
   return (
-    <div className="flex min-h-screen bg-slate-100">
-      <aside className="hidden w-60 shrink-0 flex-col bg-ink-900 p-5 text-slate-300 lg:flex">
-        <div className="flex items-center gap-2.5 text-white">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600">
-            <BatteryCharging className="h-5 w-5" />
-          </span>
-          <span className="font-extrabold">VinFast CRM</span>
-        </div>
-
-        <nav className="mt-8 space-y-1 text-sm">
-          <span className="flex items-center gap-2.5 rounded-xl bg-white/10 px-3 py-2.5 font-semibold text-white">
-            <LayoutDashboard className="h-4 w-4" />
-            Khách đăng ký lái thử
-          </span>
-          <span className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-slate-400">
-            <Users className="h-4 w-4" />
-            Nhân viên kinh doanh
-          </span>
-        </nav>
-
-        <div className="mt-auto rounded-2xl bg-white/5 p-4">
-          <div className="flex items-center gap-2.5">
-            <span className="grid h-9 w-9 place-items-center rounded-full bg-brand-500 text-sm font-bold text-white">
-              {staff.initials}
-            </span>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-white">{staff.name}</div>
-              <div className="truncate text-xs text-slate-400">{staff.email}</div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={on_logout}
-            className="mt-3.5 flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
-          >
-            <LogOut className="h-4 w-4" />
-            Đăng xuất
-          </button>
-        </div>
-      </aside>
-
-      <main className="min-w-0 flex-1 p-5 sm:p-7">
-        <header className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold">Khách đăng ký lái thử</h1>
-            <p className="mt-1 text-sm text-slate-500">
-              Xin chào {staff.name} — có {customers.length} khách trong danh sách hiện tại.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
+    <>
+      <Shell
+        staff={staff}
+        on_logout={on_logout}
+        active="customers"
+        title="Khách đăng ký lái thử"
+        subtitle={`Xin chào ${staff.name} — có ${customers.length} khách trong danh sách hiện tại.`}
+        actions={
+          <>
             <button type="button" className="btn-primary" onClick={() => set_add_open(true)}>
               <UserPlus className="h-4 w-4" />
               Thêm khách
@@ -364,14 +443,10 @@ function Dashboard({ staff, on_logout }) {
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               Tải lại
             </button>
-            <button type="button" className="btn-ghost lg:hidden" onClick={on_logout}>
-              <LogOut className="h-4 w-4" />
-              Đăng xuất
-            </button>
-          </div>
-        </header>
-
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          </>
+        }
+      >
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {counts.map((item) => (
             <div key={item.status} className="card p-4">
               <div className="text-xs uppercase tracking-wide text-slate-400">{item.status}</div>
@@ -483,7 +558,7 @@ function Dashboard({ staff, on_logout }) {
             </table>
           </div>
         </div>
-      </main>
+      </Shell>
 
       <DetailPanel
         customer={selected}
@@ -513,7 +588,7 @@ function Dashboard({ staff, on_logout }) {
       />
 
       <AgentCursor cursor={cursor} />
-    </div>
+    </>
   );
 }
 

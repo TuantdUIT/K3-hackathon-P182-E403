@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .agents.crm_lead import graph as crm_lead_graph
+from .agents.swap_car import graph as swap_car_graph
 from .agents.test_drive import graph as test_drive_graph
 from .api.routes import router
 from .config import get_settings
@@ -125,7 +126,7 @@ def create_app() -> FastAPI:
 
 
 def _mount_agent_endpoint(app: FastAPI) -> None:
-    """Phơi 2 graph theo giao thức AG-UI.
+    """Phơi 3 graph theo giao thức AG-UI.
 
     BẪY #2 — nối THẲNG AG-UI, KHÔNG dùng `CopilotKitRemoteEndpoint`.
     `CopilotKitRemoteEndpoint` nói giao thức remote-endpoint v1, cần thêm một
@@ -150,6 +151,7 @@ def _mount_agent_endpoint(app: FastAPI) -> None:
     for module, path in (
         (test_drive_graph, "/agent/test-drive"),
         (crm_lead_graph, "/agent/crm-lead"),
+        (swap_car_graph, "/agent/swap-car"),
     ):
         add_langgraph_fastapi_endpoint(
             app,

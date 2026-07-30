@@ -11,11 +11,13 @@ from pathlib import Path
 import pytest
 
 from src.backend.agents.shared.catalog import (
+    VEHICLE_PRICES,
     VEHICLES,
     match_vehicle,
     match_ward,
     normalize_phone,
     strip_accents,
+    vehicle_price,
 )
 from src.backend.agents.shared.wards import HANOI_WARDS
 
@@ -30,6 +32,23 @@ def read_js_vehicles() -> list[tuple[str, str]]:
     names = re.findall(r"^\s*name:\s*'([^']+)'", text, re.MULTILINE)
     assert len(ids) == len(names), "vehicles.js có id/name không khớp số lượng"
     return list(zip(ids, names, strict=True))
+
+
+def read_js_prices() -> dict[str, tuple[int, int]]:
+    """(priceList, priceFrom) theo id, đọc thẳng từ vehicles.js.
+
+    Nghiệp vụ đổi xe lấy giá niêm yết ở backend để tính chi phí lăn bánh (B),
+    nên giá lệch giữa hai file là báo sai tiền cho khách chứ không chỉ lệch hiển thị.
+    """
+    text = VEHICLES_JS.read_text(encoding="utf-8")
+    ids = re.findall(r"^\s*id:\s*'([^']+)'", text, re.MULTILINE)
+    price_from = [int(value) for value in re.findall(r"^\s*priceFrom:\s*(\d+)", text, re.MULTILINE)]
+    price_list = [int(value) for value in re.findall(r"^\s*priceList:\s*(\d+)", text, re.MULTILINE)]
+    assert len(ids) == len(price_from) == len(price_list), "vehicles.js thiếu giá cho một mẫu xe"
+    return {
+        vehicle_id: (listed, offered)
+        for vehicle_id, listed, offered in zip(ids, price_list, price_from, strict=True)
+    }
 
 
 def read_js_wards() -> list[str]:
@@ -62,6 +81,25 @@ class TestVehicleCatalogParity:
             "ec-van",
         }
         assert {vehicle_id for vehicle_id, _ in VEHICLES} == expected
+
+
+class TestVehiclePriceParity:
+    def test_every_vehicle_has_a_price(self):
+        assert set(VEHICLE_PRICES) == {vehicle_id for vehicle_id, _ in VEHICLES}
+
+    def test_prices_match_the_js_source(self):
+        assert read_js_prices() == VEHICLE_PRICES
+
+    def test_offer_price_never_exceeds_list_price(self):
+        # `priceList - priceFrom` chính là khuyến mãi ở bước 3; đảo ngược thì
+        # khuyến mãi ra số âm và khách bị tính thêm tiền.
+        for vehicle_id, (listed, offered) in VEHICLE_PRICES.items():
+            assert offered <= listed, vehicle_id
+
+    def test_lookup_helper(self):
+        assert vehicle_price("vf3") == VEHICLE_PRICES["vf3"]
+        assert vehicle_price("tesla") is None
+        assert vehicle_price(None) is None
 
 
 class TestWardCatalogParity:

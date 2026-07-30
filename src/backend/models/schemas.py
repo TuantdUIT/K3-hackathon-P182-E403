@@ -164,3 +164,135 @@ class CustomerOut(BaseModel):
 # `DuplicateCheckOut` khai báo trước `CustomerOut` nên phải build lại model sau khi
 # `CustomerOut` đã tồn tại, nếu không forward-ref trong annotation vẫn là chuỗi.
 DuplicateCheckOut.model_rebuild()
+
+
+# --------------------------------------------------------------------------
+# Nghiệp vụ 2 — đổi xe cũ lấy xe mới
+# --------------------------------------------------------------------------
+
+class AppraisalCreate(BaseModel):
+    """Hồ sơ định giá xe cũ do sales gửi lên (hoặc agent `swap_car` gửi hộ)."""
+
+    customer_code: str = Field(min_length=1, max_length=16)
+
+    make: str = Field(min_length=1, max_length=60)
+    model: str = Field(min_length=1, max_length=80)
+    year: int = Field(ge=1990, le=2100)
+    trim: str = ""
+    plate_no: str | None = None
+    odo_km: int = Field(default=0, ge=0)
+    first_registration_date: date
+
+    # Không khai thì `check_eligibility` lấy tuổi xe làm cận trên.
+    ownership_months: int | None = Field(default=None, ge=0)
+
+    # 4 cờ loại trừ CỨNG: ngập nước, tua km, đâm đụng kết cấu, thiếu giấy tờ.
+    flags: dict[str, bool] = Field(default_factory=dict)
+
+    # criteria_code -> mức chấm ("tot" | "kha" | "trung_binh" | "kem").
+    # Thiếu tiêu chí nào thì tiêu chí đó bị đánh dấu là ước lượng, không im lặng
+    # cho điểm tối đa.
+    levels: dict[str, str] = Field(default_factory=dict)
+
+    repair_cost: int = Field(default=0, ge=0)
+    sales_staff_id: int | None = None
+
+    @field_validator("first_registration_date")
+    @classmethod
+    def _not_in_the_future(cls, value: date) -> date:
+        if value > date.today():
+            raise ValueError("Ngày đăng ký lần đầu không được ở tương lai.")
+        return value
+
+    @field_validator("levels")
+    @classmethod
+    def _known_levels(cls, value: dict[str, str]) -> dict[str, str]:
+        from ..services.appraisal_rules import LEVELS, SCORED_CRITERIA
+
+        for code, level in value.items():
+            if code not in SCORED_CRITERIA:
+                raise ValueError(f"Tiêu chí không hợp lệ: {code}.")
+            if level not in LEVELS:
+                raise ValueError(f"Mức chấm phải thuộc: {', '.join(LEVELS)}.")
+        return value
+
+
+class QuoteCreate(BaseModel):
+    vehicle_id: str = Field(min_length=1, max_length=40)
+
+
+class ChecklistUpdate(BaseModel):
+    done: list[str] = Field(default_factory=list)
+    handover_date: date | None = None
+
+
+class AppraisalScoreOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    criteria_code: str
+    achieved_ratio: float
+    estimated: bool
+    note: str | None = None
+
+
+class TradeInQuoteOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    vehicle_id: str
+    model: str
+    list_price: int
+    total_fees: int
+    value_b: int
+    promo_new_car: int
+    trade_in_bonus: int
+    value_a: int
+    amount_c: int
+    status: str
+    handover_date: date | None = None
+    created_at: datetime
+
+
+class AppraisalOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    code: str | None
+    make: str
+    model: str
+    year: int
+    trim: str
+    plate_no: str | None
+    odo_km: int
+    first_registration_date: date
+    eligibility_status: str
+    total_score_pct: float
+    market_price: int
+    repair_cost: int
+    value_a: int
+    smart_solution_ref: str | None
+    sla_due_at: datetime | None
+    status: str
+    checklist_done: str
+    created_at: datetime
+    customer: CustomerOut | None = None
+    sales_staff: SalesStaffOut | None = None
+    scores: list[AppraisalScoreOut] = Field(default_factory=list)
+    quotes: list[TradeInQuoteOut] = Field(default_factory=list)
+
+
+class EligibilityCheckOut(BaseModel):
+    code: str
+    label: str
+    passed: bool
+    detail: str
+    why: str
+
+
+class CriteriaOut(BaseModel):
+    """Bảng tiêu chí cho UI dựng form chấm điểm — nguồn sự thật ở backend."""
+
+    code: str
+    group: str
+    label: str
+    weight_pct: int
+    auto: bool  # True = hệ thống tự tính (ODO), người chấm không sửa được
