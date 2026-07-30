@@ -1,0 +1,41 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: src/backend/Dockerfile
+    container_name: vinfast_backend
+    environment:
+      # 4 dấu gạch chéo = đường dẫn tuyệt đối tới file trong volume
+      DATABASE_URL: sqlite:////app/data/app.db
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MODEL_NAME: ${MODEL_NAME:-gpt-4o-mini}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+    volumes:
+      # Giữ SQLite qua các lần rebuild image
+      - ./data:/app/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./src/frontend
+      args:
+        # Vite nhúng cứng biến môi trường LÚC BUILD, nên phải truyền qua build args
+        # chứ không phải environment của container.
+        VITE_API_URL: ""
+        VITE_AGENT_URL: "/agent/test-drive"
+    container_name: vinfast_frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped

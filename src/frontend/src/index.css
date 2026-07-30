@@ -1,0 +1,52 @@
+@import '@copilotkit/react-ui/styles.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-slate-50 text-ink-900 font-sans antialiased;
+  }
+
+  /* Ô nhập đang được agent điền — viền sáng để khách biết con trỏ đang ở đâu. */
+  [data-agent-field]:focus {
+    @apply outline-none ring-2 ring-brand-400 border-brand-400;
+  }
+}
+
+@layer components {
+  .field-label {
+    @apply mb-1.5 block text-sm font-medium text-slate-700;
+  }
+
+  .field-input {
+    @apply w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-ink-900
+      transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-200;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5
+      text-sm font-semibold text-white transition hover:bg-brand-700
+      focus:outline-none focus:ring-2 focus:ring-brand-300 disabled:cursor-not-allowed
+      disabled:opacity-60;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300
+      bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50;
+  }
+
+  .card {
+    @apply rounded-2xl border border-slate-200 bg-white shadow-sm;
+  }
+}
+
+/* CopilotKit popup: nâng lên trên overlay modal nhưng vẫn dưới con trỏ ảo (z-200). */
+.copilotKitPopup {
+  z-index: 120;
+}
