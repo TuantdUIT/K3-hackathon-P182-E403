@@ -23,8 +23,13 @@ from ...services.appraisal_rules import SCORED_CRITERIA
 
 RunKind = Literal["full", "correction"]
 
-# Các ô của form hồ sơ định giá, đúng thứ tự con trỏ đi qua.
-FORM_FIELDS: tuple[str, ...] = (
+# Form gồm 4 khối, xếp trên màn hình theo đúng thứ tự này:
+#   1. Thông tin xe cũ   2. Điều kiện loại trừ cứng
+#   3. Chấm điểm thẩm định   4. Xe mới khách muốn đổi
+# Hai khối ô nhập nằm ở hai ĐẦU form nên phải tách ra: gộp chung một tuple thì
+# `plan_node` nạp cả `vehicle_id`/`repair_cost` ngay từ đầu hàng đợi, con trỏ
+# nhảy thẳng xuống khối cuối rồi mới ngược lên bảng chấm điểm.
+OLD_CAR_FIELDS: tuple[str, ...] = (
     "make",
     "model",
     "year",
@@ -32,9 +37,15 @@ FORM_FIELDS: tuple[str, ...] = (
     "plate_no",
     "odo_km",
     "first_registration_date",
-    "repair_cost",
-    "vehicle_id",
 )
+
+NEW_CAR_FIELDS: tuple[str, ...] = (
+    "vehicle_id",
+    "repair_cost",
+)
+
+# Toàn bộ ô nhập của form, dùng khi cần duyệt draft mà không quan tâm khối nào.
+FORM_FIELDS: tuple[str, ...] = OLD_CAR_FIELDS + NEW_CAR_FIELDS
 
 # Thiếu một trong số này thì không chạy được cổng loại trừ lẫn công thức A.
 # `trim`, `plate_no`, `repair_cost` cố tình KHÔNG bắt buộc: xe không phân bản là
@@ -130,6 +141,14 @@ class SwapCarState(TypedDict, total=False):
     # Điều phối
     awaiting: str | None
     revise_rounds: int
+
+    # Vòng sửa HỒ SƠ (khác `revise_rounds` — vòng sửa GIÁ). Sales soát lại thông
+    # tin xe cũ sau khi con trỏ điền xong, gõ chỗ sai vào khung chat.
+    # `changed_fields` là danh sách ô thật sự đổi, để `plan_node` chỉ điền lại
+    # đúng mấy ô đó thay vì diễn lại cả form từ đầu.
+    correction_rounds: int
+    changed_fields: list[str]
+
     status: str
 
     # Dùng cho test gọi node trực tiếp, không đi qua messages
@@ -170,6 +189,8 @@ def empty_state() -> SwapCarState:
         handover_date=None,
         awaiting=None,
         revise_rounds=0,
+        correction_rounds=0,
+        changed_fields=[],
         status="idle",
         query=None,
         response=None,

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 
+import { begin_cursor_run, end_cursor_run } from './cursorBusy';
 import { next_frame, sleep, wait_for_element } from './useAgentCursor';
 
 const TYPE_DELAY_MS = 45;
@@ -72,6 +73,12 @@ export function useAgentActionRunner({
     if (running_ref.current) return;
     running_ref.current = true;
 
+    // Bật cờ để thẻ HITL biết form còn đang được điền dở. Backend tính xong và
+    // bắn `interrupt` gần như tức thì, còn con trỏ là bản phát lại chậm hơn
+    // nhiều — không có cờ này thì nút "Khách đồng ý giá" bấm được lúc form mới
+    // có đúng một ô.
+    begin_cursor_run();
+
     const generation = generation_ref.current;
 
     (async () => {
@@ -92,6 +99,9 @@ export function useAgentActionRunner({
         }
       } finally {
         running_ref.current = false;
+        // Phải hạ cờ KỂ CẢ khi worker thoát sớm vì lệch generation (unmount,
+        // StrictMode) — bỏ sót một lần là thẻ duyệt khoá vĩnh viễn.
+        end_cursor_run();
         if (generation_ref.current === generation) {
           controls.hide();
           callbacks_ref.current.on_queue_idle?.();
@@ -129,9 +139,18 @@ async function run_action(action, controls, callbacks, generation, generation_re
     return;
   }
 
-  // type === 'select': set thẳng giá trị, không có gì để gõ.
+  // type === 'select': dropdown native không mở được bằng JS, nên thay vì để
+  // giá trị nhảy đánh cụp một cái, diễn hoạt hai nhịp cho người xem kịp bắt
+  // được ô nào vừa đổi — giữ con trỏ tại ô một nhịp ("đang mở"), đổi giá trị,
+  // rồi nhấn thêm một nhịp nữa ("đã chọn").
+  await sleep(220);
+  if (!alive()) return;
+
   callbacks.set_form_data?.(field, String(value ?? ''));
-  await sleep(250);
+  if (!alive()) return;
+
+  await controls.click(element);
+  await sleep(150);
 }
 
 async function run_pick_ward(action, controls, callbacks, alive) {

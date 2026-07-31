@@ -184,14 +184,17 @@ export default function AddCustomerModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-ink-900/60 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-ink-900/60 p-4 backdrop-blur-sm"
         >
+          {/* Modal cao TỐI ĐA bằng màn hình và tự cắt phần thừa. Trước đây cả
+              modal trôi theo lớp nền, nên cuộn xuống điền form là khung chat
+              biến mất khỏi tầm nhìn. Giờ chỉ cột form cuộn, chat đứng yên. */}
           <motion.div
             initial={{ opacity: 0, y: 24, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 16, scale: 0.98 }}
             transition={{ duration: 0.25 }}
-            className="relative my-6 w-full max-w-6xl overflow-hidden rounded-3xl bg-white shadow-lift"
+            className="relative flex max-h-[calc(100vh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-3xl bg-white shadow-lift"
           >
             <button
               type="button"
@@ -205,14 +208,23 @@ export default function AddCustomerModal({
             </button>
 
             {created_customer ? (
-              <SuccessPanel
-                customer={created_customer}
-                on_add_another={() => reset_all()}
-                on_close={try_close}
-              />
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <SuccessPanel
+                  customer={created_customer}
+                  on_add_another={() => reset_all()}
+                  on_close={try_close}
+                />
+              </div>
             ) : (
-              <div className="grid lg:grid-cols-[1fr_minmax(0,380px)]">
-                <form onSubmit={on_submit} className="p-6 sm:p-8">
+              // Dưới lg hai cột xếp chồng nên để cả khối cuộn chung; từ lg trở
+              // lên mỗi cột tự cuộn phần của mình.
+              //
+              // `lg:grid-rows-1` là bắt buộc: hàng ngầm của grid được tính theo
+              // NỘI DUNG, nên form dài sẽ đẩy hàng cao hơn khung và bị cắt cụt
+              // thay vì cuộn. `grid-rows-1` ép hàng đúng bằng chiều cao khung
+              // (repeat(1, minmax(0,1fr))) để hai cột co lại và tự cuộn.
+              <div className="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-[1fr_minmax(0,380px)] lg:grid-rows-1 lg:overflow-hidden">
+                <form onSubmit={on_submit} className="min-h-0 p-6 sm:p-8 lg:overflow-y-auto">
                   <h2 className="text-2xl font-bold">Thêm khách hàng</h2>
                   <p className="mt-1.5 text-sm text-slate-500">
                     Dành cho khách gọi điện, đến showroom hoặc nhắn qua Facebook/Zalo. Các ô có
@@ -430,8 +442,10 @@ export default function AddCustomerModal({
                 </form>
 
                 {/* Chat NHÚNG (không dùng CopilotPopup): sales cần thấy form và chat
-                    cùng lúc, và thẻ xác nhận HITL render ngay trong khung này. */}
-                <aside className="flex min-h-[560px] flex-col border-t border-slate-200 bg-slate-50 lg:border-l lg:border-t-0">
+                    cùng lúc, và thẻ xác nhận HITL render ngay trong khung này.
+                    Từ lg trở lên cột này KHÔNG cuộn — nó là điểm neo cố định bên
+                    phải trong khi cột form trượt qua bên trái. */}
+                <aside className="flex min-h-[440px] flex-col border-t border-slate-200 bg-slate-50 lg:min-h-0 lg:border-l lg:border-t-0">
                   <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-4">
                     <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand-600 text-white">
                       <Bot className="h-4 w-4" />
@@ -444,7 +458,11 @@ export default function AddCustomerModal({
                     </div>
                   </div>
 
-                  <div className="min-h-0 flex-1">
+                  {/* `chat-dock is-pinned` (index.css): ô nhập ghim ở góc dưới
+                      bên phải, đè lên danh sách tin nhắn. Chọn biến thể ghim vì
+                      khung này cao cố định và sales vừa cuộn form vừa nhắn —
+                      ô nhập phải luôn ở đúng một chỗ. */}
+                  <div className="chat-dock is-pinned min-h-0 flex-1">
                     <CopilotChat
                       className="h-full"
                       instructions="Bạn là trợ lý nhập liệu cho nhân viên kinh doanh VinFast. Người nhắn tin là NHÂN VIÊN, đang thuật lại thông tin của một khách hàng thứ ba. Luôn trả lời bằng tiếng Việt."

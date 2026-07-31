@@ -35,6 +35,8 @@ from .state import (
     FIELD_LABELS,
     FLAG_FIELDS,
     FORM_FIELDS,
+    NEW_CAR_FIELDS,
+    OLD_CAR_FIELDS,
     REQUIRED_FIELDS,
     SCORE_FIELDS,
     TYPE_FIELDS,
@@ -371,6 +373,10 @@ async def extract_node(state: SwapCarState) -> dict[str, Any]:
         "missing_fields": _missing_fields(draft),
         "appraisal_code": None if fresh else state.get("appraisal_code"),
         "revise_rounds": 0,
+        # Lượt mới điền lại toàn form, nên phải xoá dấu vết vòng sửa cũ — còn sót
+        # `changed_fields` là `plan_node` tưởng đây là lượt sửa và chỉ điền vài ô.
+        "correction_rounds": 0,
+        "changed_fields": [],
         "filled_fields": [],
         "current_action": None,
         "action_queue": [],
@@ -420,7 +426,60 @@ async def eligibility_node(state: SwapCarState) -> dict[str, Any]:
 
 
 def route_after_eligibility(state: SwapCarState) -> str:
-    return "explain" if state.get("eligibility_status") == "passed" else "rejected"
+    return "market_check" if state.get("eligibility_status") == "passed" else "rejected"
+
+
+# --------------------------------------------------------------------------
+# Node: market_check — có giá thị trường thì mới bõ công điền hồ sơ
+#
+# `appraise` vẫn bắt `NoMarketPriceError`, nhưng nó chạy SAU `plan`/`fill`: xe
+# không tra được giá thì sales vẫn phải ngồi xem con trỏ gõ hết 14 ô rồi mới
+# nhận được câu "hệ thống chưa có giá". Chốt chặn ở đây để không diễn hoạt một
+# hồ sơ chắc chắn không tính ra tiền. Nhánh trong `appraise` giữ nguyên làm lưới
+# an toàn cho trường hợp bảng giá đổi giữa chừng.
+# --------------------------------------------------------------------------
+
+def _has_market_price(draft: dict[str, Any]) -> bool:
+    with SessionLocal() as session:
+        row = appraisal_repo.find_market_price(
+            session,
+            make=str(draft.get("make") or ""),
+            model=str(draft.get("model") or ""),
+            year=int(draft.get("year") or 0),
+            trim=str(draft.get("trim") or ""),
+        )
+        return row is not None
+
+
+async def market_check_node(state: SwapCarState) -> dict[str, Any]:
+    draft = state.get("draft") or {}
+
+    try:
+        found = await asyncio.to_thread(_has_market_price, draft)
+    except Exception:  # noqa: BLE001 - lỗi DB không được chặn luồng, còn lưới ở `appraise`
+        found = True
+
+    if found:
+        return {"status": "market_ok"}
+
+    content = say.NO_MARKET_PRICE.format(
+        make=draft.get("make") or "",
+        model=draft.get("model") or "",
+        year=draft.get("year") or "",
+    )
+    return {
+        "messages": [AIMessage(content=content)],
+        # Dọn sạch hàng đợi: không có action nào thì con trỏ không hiện lên.
+        "action_queue": [],
+        "current_action": None,
+        "status": "manual_appraisal",
+        "error": "no_market_price",
+        "response": content,
+    }
+
+
+def route_after_market_check(state: SwapCarState) -> str:
+    return "explain" if state.get("status") == "market_ok" else "end"
 
 
 def _persist_rejected(payload: dict[str, Any]) -> str:
@@ -563,53 +622,58 @@ async def plan_node(state: SwapCarState) -> dict[str, Any]:
     run_seq = int(state.get("run_seq") or 0) + 1
     queue: list[dict[str, Any]] = []
 
-    for field in FORM_FIELDS:
-        value = draft.get(field)
-        if value in (None, ""):
-            continue
-        action_type = "type" if field in TYPE_FIELDS else "select"
+    # Lượt sửa hồ sơ chỉ diễn lại ĐÚNG mấy ô vừa đổi. Diễn lại cả form thì sales
+    # phải ngồi xem con trỏ gõ lại 14 ô để thấy một con số đổi.
+    only = set(state.get("changed_fields") or [])
+
+    def push(field: str, label: str, value: Any, action_type: str = "select") -> None:
+        if only and field not in only:
+            return
         queue.append(
             {
                 "type": action_type,
                 "field": field,
-                "label": FIELD_LABELS[field],
+                "label": label,
                 "selector": f"[data-agent-field={field}]",
                 "value": str(value),
                 "run_seq": run_seq,
             }
         )
 
-    for field in SCORE_FIELDS:
-        code = field.removeprefix("score_")
-        if code not in levels:
-            continue
-        queue.append(
-            {
-                "type": "select",
-                "field": field,
-                "label": rules.CRITERIA_LABEL[code],
-                "selector": f"[data-agent-field={field}]",
-                "value": levels[code],
-                "run_seq": run_seq,
-            }
-        )
+    def push_draft(fields: tuple[str, ...]) -> None:
+        for field in fields:
+            value = draft.get(field)
+            if value in (None, ""):
+                continue
+            push(
+                field,
+                FIELD_LABELS[field],
+                value,
+                "type" if field in TYPE_FIELDS else "select",
+            )
 
+    # `fill_node` pop từ đầu hàng đợi nên con trỏ đi đúng thứ tự nạp ở đây.
+    # Thứ tự đó phải TRÙNG thứ tự các khối trên màn hình — người ngồi xem đọc
+    # form từ trên xuống, con trỏ nhảy cóc là mất dấu.
+    #   1. Thông tin xe cũ
+    push_draft(OLD_CAR_FIELDS)
+
+    #   2. Điều kiện loại trừ cứng (nằm ngay dưới khối thông tin xe cũ)
     for field in FLAG_FIELDS:
         code = field.removeprefix("flag_")
-        if not flags.get(code):
-            continue
-        queue.append(
-            {
-                "type": "select",
-                "field": field,
-                "label": rules.HARD_FLAGS[code][0],
-                "selector": f"[data-agent-field={field}]",
-                "value": "1",
-                "run_seq": run_seq,
-            }
-        )
+        if flags.get(code):
+            push(field, rules.HARD_FLAGS[code][0], "1")
 
-    run_kind = "correction" if state.get("revise_rounds") else "full"
+    #   3. Chấm điểm thẩm định
+    for field in SCORE_FIELDS:
+        code = field.removeprefix("score_")
+        if code in levels:
+            push(field, rules.CRITERIA_LABEL[code], levels[code])
+
+    #   4. Xe mới khách muốn đổi — khối CUỐI form, phải điền sau cùng
+    push_draft(NEW_CAR_FIELDS)
+
+    run_kind = "correction" if (only or state.get("revise_rounds")) else "full"
     content = say.PLAN_CORRECTION if run_kind == "correction" else say.PLAN_FULL
 
     return {
@@ -625,7 +689,7 @@ async def plan_node(state: SwapCarState) -> dict[str, Any]:
 
 
 def route_after_plan(state: SwapCarState) -> str:
-    return "fill" if state.get("action_queue") else "appraise"
+    return "fill" if state.get("action_queue") else "confirm_form"
 
 
 async def fill_node(state: SwapCarState) -> dict[str, Any]:
@@ -650,7 +714,227 @@ async def fill_node(state: SwapCarState) -> dict[str, Any]:
 
 
 def route_after_fill(state: SwapCarState) -> str:
-    return "fill" if state.get("action_queue") else "appraise"
+    return "fill" if state.get("action_queue") else "confirm_form"
+
+
+# --------------------------------------------------------------------------
+# Node: confirm_form / patch_form — sales soát hồ sơ trước khi chấm điểm
+#
+# Chèn giữa `fill` và `appraise` theo đúng cặp `confirm_details` + `patch` của
+# agent CRM. Lý do phải có: `revise` (nhánh H) chỉ sửa được chi phí sửa chữa,
+# xe mới và mức chấm — bóc tách nhầm đời xe hay số km thì trước đây sales không
+# có đường sửa qua chat, mà `appraise` đã kịp ghi hồ sơ vào DB bằng số sai rồi.
+# Chốt trước khi ghi luôn rẻ hơn sửa sau khi ghi.
+# --------------------------------------------------------------------------
+
+MAX_CORRECTION_ROUNDS = 3
+
+# Từ khoá nhận biết sales đang nói tới ô nào của khối "Thông tin xe cũ".
+# Cùng vai trò với `FIELD_KEYWORDS` của nhánh revise, nhưng cho nhóm ô khác.
+FORM_FIELD_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "make": ("hang", "hang xe", "thuong hieu"),
+    "model": ("dong xe", "mau xe cu", "ten xe"),
+    "trim": ("phien ban", "ban", "trim"),
+    "plate_no": ("bien", "bien so", "bks"),
+    "odo_km": ("odo", "km", "so km", "cong to met", "van", "da chay"),
+    "first_registration_date": ("dang ky", "dang ky lan dau", "ngay dang ky", "lan dau"),
+}
+
+# Ô cần thêm ngữ cảnh mới dám nhận, không đủ an toàn để bắt bằng từ khoá trần.
+#
+# `year`: bỏ dấu thì "đời" và "đổi" đều ra "doi", nên "đổi sang VF 6" — câu sales
+# gõ thường xuyên ngay tại thẻ soát này — sẽ bị tính là sửa Đời xe. Bắt buộc
+# phải có số 4 chữ số đi kèm thì mới coi là nói về đời xe.
+#
+# `model`: "dòng" và "động" cũng chập làm một sau khi bỏ dấu, mà "động cơ" là
+# thứ sales nhắc liên tục lúc chấm điểm. Nhận "dong" nhưng chặn "dong co".
+FORM_FIELD_PATTERNS: dict[str, str] = {
+    "year": r"\b(?:doi(?:\s+xe)?|nam\s+(?:sx|san\s+xuat))\s+(?:la\s+)?(?:19|20)\d{2}\b",
+    "model": r"\bdong\b(?!\s+co)",
+}
+
+
+def mentioned_form_fields(text: str) -> set[str]:
+    """Đoán sales đang sửa ô nào, bằng từ khoá không dấu + biên từ.
+
+    Phải dùng `\\b` chứ không phải `in`: "ban" nằm trong "bien ban", "dong" nằm
+    trong "dong co" — dùng `in` là mỗi câu nhắc động cơ lại kéo theo ô Dòng xe.
+    """
+    plain = _plain(text)
+    found: set[str] = set()
+
+    for field, keywords in FORM_FIELD_KEYWORDS.items():
+        for keyword in keywords:
+            if re.search(rf"\b{re.escape(keyword)}\b", plain):
+                found.add(field)
+                break
+
+    for field, pattern in FORM_FIELD_PATTERNS.items():
+        if re.search(pattern, plain):
+            found.add(field)
+
+    return found
+
+
+def _form_summary(draft: dict[str, Any], levels: dict[str, str]) -> dict[str, Any]:
+    """Tóm tắt gửi kèm interrupt để thẻ HITL bày ra cho sales soát."""
+    rows = [
+        {"field": field, "label": FIELD_LABELS[field], "value": str(draft.get(field) or "")}
+        for field in OLD_CAR_FIELDS
+        if draft.get(field) not in (None, "")
+    ]
+    # `LEVEL_LABELS` là câu mô tả đầy đủ ("Tốt — đúng như mô tả tiêu chí"), dùng
+    # cho chỗ giải thích thang chấm. Ở đây chỉ cần tên mức.
+    scored = [
+        {
+            "code": code,
+            "label": rules.CRITERIA_LABEL[code],
+            "level": rules.LEVEL_LABELS[level].split(" — ")[0],
+        }
+        for code, level in levels.items()
+        if code in rules.CRITERIA_LABEL and level in rules.LEVEL_LABELS
+    ]
+    return {"rows": rows, "scored": scored}
+
+
+async def confirm_form_node(state: SwapCarState) -> dict[str, Any]:
+    """Đóng băng graph cho sales soát hồ sơ vừa điền.
+
+    Trả lời khẳng định -> đi chấm điểm. Mọi câu khác đều coi là yêu cầu sửa và
+    đẩy nguyên văn sang `patch_form` — sales gõ "odo 54.000 thôi" là câu sửa,
+    không phải câu từ chối, nên không được bắt họ nói "không" trước.
+    """
+    draft = state.get("draft") or {}
+    levels = state.get("levels") or {}
+
+    answer = interrupt(
+        {
+            "kind": "swap_confirm_form",
+            "customer_name": state.get("customer_name"),
+            "summary": _form_summary(draft, levels),
+            "flags": [
+                rules.HARD_FLAGS[code][0]
+                for code, on in (state.get("flags") or {}).items()
+                if on and code in rules.HARD_FLAGS
+            ],
+            "rounds": int(state.get("correction_rounds") or 0),
+            "max_rounds": MAX_CORRECTION_ROUNDS,
+        }
+    )
+    text = str(answer or "")
+
+    if classify_answer(text) == "yes":
+        return {
+            "awaiting": None,
+            "changed_fields": [],
+            "status": "form_confirmed",
+            "query": None,
+        }
+    return {"awaiting": None, "status": "form_needs_patch", "query": text}
+
+
+def route_after_confirm_form(state: SwapCarState) -> str:
+    return "appraise" if state.get("status") == "form_confirmed" else "patch_form"
+
+
+async def patch_form_node(state: SwapCarState) -> dict[str, Any]:
+    """Áp câu sửa của sales vào draft/flags/levels, rồi cho con trỏ điền lại."""
+    rounds = int(state.get("correction_rounds") or 0) + 1
+    text = str(state.get("query") or "").strip()
+
+    if rounds > MAX_CORRECTION_ROUNDS:
+        content = say.FORM_PATCH_EXHAUSTED.format(rounds=MAX_CORRECTION_ROUNDS)
+        return {
+            "messages": [AIMessage(content=content)],
+            "correction_rounds": rounds,
+            "changed_fields": [],
+            "status": "manual_pending",
+            "response": content,
+        }
+
+    old_draft = dict(state.get("draft") or {})
+    old_flags = dict(state.get("flags") or {})
+    old_levels = dict(state.get("levels") or {})
+
+    try:
+        extracted = await _extract_with_llm(text) if text else ExtractedSwapCar()
+        llm_draft, llm_flags, llm_levels = _normalize(extracted)
+    except Exception:  # noqa: BLE001 - còn nhánh từ khoá để cứu, không sập graph
+        llm_draft, llm_flags, llm_levels = {}, {}, {}
+
+    # Chỉ nhận kết quả LLM cho ô sales THỰC SỰ nhắc tới. Không lọc thì LLM hay
+    # điền lại cả form theo trí nhớ và ghi đè ô sales không hề đụng tới.
+    mentioned = mentioned_form_fields(text)
+    new_draft = dict(old_draft)
+    for field in OLD_CAR_FIELDS:
+        if field in mentioned and llm_draft.get(field) not in (None, ""):
+            new_draft[field] = llm_draft[field]
+
+    # `parse_revision` đọc bằng từ khoá nên chắc tay hơn LLM cho ba thứ này —
+    # dùng lại nguyên vẹn để câu sửa giá và câu sửa hồ sơ hiểu giống hệt nhau.
+    changes, keyword_levels = parse_revision(text)
+    new_draft.update(changes)
+
+    new_levels = {**old_levels, **llm_levels, **keyword_levels}
+    new_flags = {**old_flags, **llm_flags}
+
+    changed: list[str] = [
+        field for field in FORM_FIELDS if new_draft.get(field) != old_draft.get(field)
+    ]
+    changed += [
+        f"score_{code}"
+        for code in rules.SCORED_CRITERIA
+        if new_levels.get(code) != old_levels.get(code)
+    ]
+    changed += [
+        f"flag_{code}"
+        for code in rules.HARD_FLAGS
+        if bool(new_flags.get(code)) != bool(old_flags.get(code))
+    ]
+
+    if not changed:
+        content = say.FORM_PATCH_UNCLEAR
+        return {
+            "messages": [AIMessage(content=content)],
+            "correction_rounds": rounds,
+            "changed_fields": [],
+            "status": "form_patch_unclear",
+            "query": None,
+            "response": content,
+        }
+
+    labels = _join_labels([_changed_label(field) for field in changed])
+    content = say.FORM_PATCH_APPLIED.format(labels=labels)
+
+    return {
+        "messages": [AIMessage(content=content)],
+        "draft": new_draft,
+        "flags": new_flags,
+        "levels": new_levels,
+        "missing_fields": _missing_fields(new_draft),
+        "changed_fields": changed,
+        "correction_rounds": rounds,
+        "status": "form_patched",
+        "query": None,
+        "response": content,
+    }
+
+
+def _changed_label(field: str) -> str:
+    if field.startswith("score_"):
+        return rules.CRITERIA_LABEL[field.removeprefix("score_")]
+    if field.startswith("flag_"):
+        return rules.HARD_FLAGS[field.removeprefix("flag_")][0]
+    return FIELD_LABELS[field]
+
+
+def route_after_patch_form(state: SwapCarState) -> str:
+    status = state.get("status")
+    if status == "form_patched":
+        return "plan"
+    # Không hiểu câu sửa -> quay lại thẻ soát để sales gõ lại, chứ không đẩy tiếp
+    # xuống `appraise` bằng hồ sơ mà chính sales vừa bảo là sai.
+    return "confirm_form" if status == "form_patch_unclear" else "end"
 
 
 # --------------------------------------------------------------------------

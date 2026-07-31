@@ -14,6 +14,7 @@ import Navbar from './components/Navbar.jsx';
 import TestDriveModal from './components/TestDriveModal.jsx';
 import VehicleGrid from './components/VehicleGrid.jsx';
 import { vehicles } from './data/vehicles.js';
+import { useNavigation } from './lib/navigation.jsx';
 import useAgentActionRunner from './lib/useAgentActionRunner.js';
 import useAgentCursor from './lib/useAgentCursor.js';
 
@@ -30,9 +31,13 @@ const empty_form = {
 const default_vehicle_id = 'vf8';
 
 export default function App() {
+  // Đọc từ router thay vì `window.location`: đổi tab bây giờ là `pushState`,
+  // `window.location` có đổi nhưng React không biết mà render lại.
   // `startsWith` chứ không phải `===`: Admin Portal có nhiều tab, mỗi tab một
   // đường dẫn con (`/admin-portal/dinh-gia`).
-  if (window.location.pathname.startsWith('/admin-portal')) {
+  const { path } = useNavigation();
+
+  if (path.startsWith('/admin-portal')) {
     return <AdminPortal />;
   }
   return <Showcase />;

@@ -2,6 +2,7 @@ import { useCoAgent, useLangGraphInterrupt } from '@copilotkit/react-core';
 import { CopilotChat } from '@copilotkit/react-ui';
 import {
   AlertTriangle,
+  ArrowUp,
   Bot,
   Calculator,
   CheckCircle2,
@@ -26,6 +27,7 @@ import {
 } from '../lib/api.js';
 import { format_date } from '../lib/formatDate.js';
 import { format_price } from '../lib/formatPrice.js';
+import { useInterruptPending } from '../lib/interruptGate.js';
 import useAgentActionRunner from '../lib/useAgentActionRunner.js';
 import useAgentCursor from '../lib/useAgentCursor.js';
 import AgentCursor from './AgentCursor.jsx';
@@ -216,6 +218,8 @@ export default function AppraisalBoard({ staff }) {
   }, [run_seq, run_kind, reset_form]);
 
   useAgentActionRunner({ current_action, controls, set_form_data });
+
+  const chat_locked = useInterruptPending();
 
   useLangGraphInterrupt({
     render: ({ event, resolve }) => <SwapCarApprovalCard event={event} resolve={resolve} />,
@@ -426,13 +430,26 @@ export default function AppraisalBoard({ staff }) {
             </div>
           </div>
 
-          <div className="min-h-0 flex-1">
+          {/* `is-snug` chứ không `is-pinned` như modal thêm khách: khung này cao
+              gần bằng màn hình, nếu ghim đáy thì lúc mới mở (chỉ có 1 câu chào)
+              ô nhập nằm cách nội dung cả màn hình và phải lướt xuống mới gõ
+              được. `is-snug` cho nó bám ngay dưới tin nhắn cuối. */}
+          {/* Ô nhập bị khoá khi thẻ HITL đang chờ: lúc graph dừng ở `interrupt()`
+              chỉ `resolve()` từ thẻ mới vào được graph, gõ ở đây là mất tin. */}
+          {chat_locked && (
+            <p className="flex items-center gap-1.5 border-b border-amber-200 bg-amber-50 px-5 py-2 text-xs text-amber-800">
+              <ArrowUp className="h-3.5 w-3.5 shrink-0" />
+              Anh/chị trả lời ở thẻ trong khung chat giúp em, ô nhập bên dưới tạm khoá ạ.
+            </p>
+          )}
+
+          <div className={`chat-dock is-snug min-h-0 flex-1${chat_locked ? ' is-locked' : ''}`}>
             <CopilotChat
               className="h-full"
               instructions="Bạn là trợ lý định giá xe cũ cho nhân viên kinh doanh VinFast. Người nhắn tin là NHÂN VIÊN, đang thuật lại tình trạng xe cũ của một khách hàng thứ ba. Luôn trả lời bằng tiếng Việt."
               labels={{
                 initial:
-                  'Anh/chị chọn khách bên trái rồi đọc thông tin xe cũ giúp em ạ.\n\nVí dụ: "Khách đổi Honda City 2022 bản RS, chạy 4 vạn km, đăng ký tháng 3/2022, máy êm gầm hơi rỉ, muốn lấy VF 6".',
+                  'Hãy nhập thông tin xe cũ của khách để tôi hỗ trợ định giá\n\nVí dụ: "Khách đổi Honda City 2022 bản RS, chạy 4 vạn km, đăng ký tháng 3/2022, máy êm gầm hơi rỉ, muốn lấy VF 6".',
                 placeholder: 'Nhập tình trạng xe cũ của khách...',
               }}
             />

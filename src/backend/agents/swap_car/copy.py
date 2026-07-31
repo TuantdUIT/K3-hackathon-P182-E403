@@ -53,6 +53,26 @@ APPRAISE_FAILED = (
     "Anh/chị bấm nút lưu trên form để thử lại giúp em nhé."
 )
 
+# --- soát hồ sơ trước khi chấm điểm (HITL) ---
+
+ASK_FORM_OK = (
+    "Em điền xong hồ sơ rồi ạ. Anh/chị soát lại giúp em, có chỗ nào sai thì cứ "
+    "nói ngay trong khung chat — ví dụ \"odo 54.000 km thôi\" hoặc \"đời 2021 "
+    "chứ không phải 2022\"."
+)
+
+FORM_PATCH_APPLIED = "Em sửa lại {labels} rồi ạ, anh/chị theo dõi con trỏ điền lại giúp em."
+
+FORM_PATCH_UNCLEAR = (
+    "Em chưa rõ anh/chị muốn sửa ô nào ạ. Anh/chị nói kèm tên ô và giá trị mới "
+    "giúp em nhé, ví dụ \"số km 54.000\", \"đời xe 2021\", \"gầm chấm mức khá\"."
+)
+
+FORM_PATCH_EXHAUSTED = (
+    "Hồ sơ đã sửa {rounds} lượt mà vẫn chưa khớp ạ. Anh/chị chỉnh trực tiếp trên "
+    "form bên cạnh rồi bấm \"Tính định giá & báo giá\" giúp em cho nhanh."
+)
+
 SMART_SOLUTION = (
     "Em đã chuyển hồ sơ {code} sang Smart Solution thẩm định ({steps} bước, "
     "khoảng {items} hạng mục). Kết quả dự kiến có trong {sla} giờ — em sẽ nhắc "

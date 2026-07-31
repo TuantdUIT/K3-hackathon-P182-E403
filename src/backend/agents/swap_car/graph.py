@@ -18,11 +18,23 @@ với node ở đây để sau này sửa sơ đồ là biết phải sửa ch�
     K                checklist_blocked   (chặn MỀM, nêu mục còn thiếu)
     L                handover            (chốt ngày giao xe)
 
+Ngoài sơ đồ: cặp `confirm_form` + `patch_form` chèn giữa `fill` và `appraise`,
+mượn nguyên cặp `confirm_details` + `patch` của agent CRM. Sales soát hồ sơ con
+trỏ vừa điền và gõ chỗ sai vào khung chat TRƯỚC khi `appraise` ghi vào DB —
+`revise` ở nhánh H chỉ sửa được chi phí/xe mới/mức chấm, không sửa được đời xe
+hay số km bóc tách nhầm.
+
 START -> init -> extract
 extract -> ask_missing -> END                 (thiếu field bắt buộc / chưa chọn khách)
 extract -> eligibility
 eligibility -> rejected -> END
-eligibility -> explain -> plan -> fill (tự lặp) -> appraise
+eligibility -> market_check
+market_check -> END                           (không có giá thị trường -> KHÔNG điền form)
+market_check -> explain -> plan -> fill (tự lặp) -> confirm_form
+confirm_form -> patch_form -> plan            (sửa -> điền lại -> soát lại)
+patch_form -> confirm_form                    (không hiểu câu sửa, hỏi lại)
+patch_form -> END                             (quá 3 vòng sửa)
+confirm_form -> appraise
 appraise -> END                               (không có giá thị trường -> thủ công)
 appraise -> quote -> confirm_price
 confirm_price -> revise -> quote | END        (quá 3 vòng sửa)
@@ -39,6 +51,7 @@ from .nodes import (
     ask_missing_node,
     checklist_blocked_node,
     checklist_node,
+    confirm_form_node,
     confirm_price_node,
     eligibility_node,
     explain_node,
@@ -46,16 +59,21 @@ from .nodes import (
     fill_node,
     handover_node,
     init_node,
+    market_check_node,
+    patch_form_node,
     plan_node,
     quote_node,
     rejected_node,
     revise_node,
     route_after_appraise,
     route_after_checklist,
+    route_after_confirm_form,
     route_after_confirm_price,
     route_after_eligibility,
     route_after_extract,
     route_after_fill,
+    route_after_market_check,
+    route_after_patch_form,
     route_after_plan,
     route_after_revise,
 )
@@ -73,9 +91,12 @@ def build_graph(*, checkpointer=None):
     builder.add_node("ask_missing", ask_missing_node)
     builder.add_node("eligibility", eligibility_node)
     builder.add_node("rejected", rejected_node)
+    builder.add_node("market_check", market_check_node)
     builder.add_node("explain", explain_node)
     builder.add_node("plan", plan_node)
     builder.add_node("fill", fill_node)
+    builder.add_node("confirm_form", confirm_form_node)
+    builder.add_node("patch_form", patch_form_node)
     builder.add_node("appraise", appraise_node)
     builder.add_node("quote", quote_node)
     builder.add_node("confirm_price", confirm_price_node)
@@ -99,16 +120,36 @@ def build_graph(*, checkpointer=None):
     builder.add_conditional_edges(
         "eligibility",
         route_after_eligibility,
-        {"explain": "explain", "rejected": "rejected"},
+        {"market_check": "market_check", "rejected": "rejected"},
     )
     builder.add_edge("rejected", END)
 
+    # Không tra được giá thị trường thì dừng tại đây, KHÔNG cho con trỏ điền:
+    # hồ sơ đó chắc chắn không tính ra tiền, diễn hoạt 14 ô chỉ để báo lỗi ở
+    # cuối là bắt sales ngồi xem một việc vô ích.
+    builder.add_conditional_edges(
+        "market_check", route_after_market_check, {"explain": "explain", "end": END}
+    )
+
     builder.add_edge("explain", "plan")
     builder.add_conditional_edges(
-        "plan", route_after_plan, {"fill": "fill", "appraise": "appraise"}
+        "plan", route_after_plan, {"fill": "fill", "confirm_form": "confirm_form"}
     )
     builder.add_conditional_edges(
-        "fill", route_after_fill, {"fill": "fill", "appraise": "appraise"}
+        "fill", route_after_fill, {"fill": "fill", "confirm_form": "confirm_form"}
+    )
+
+    # Chốt hồ sơ TRƯỚC khi ghi DB. Vòng `patch_form -> plan -> fill ->
+    # confirm_form` lặp lại được, `MAX_CORRECTION_ROUNDS` là thứ cắt vòng.
+    builder.add_conditional_edges(
+        "confirm_form",
+        route_after_confirm_form,
+        {"appraise": "appraise", "patch_form": "patch_form"},
+    )
+    builder.add_conditional_edges(
+        "patch_form",
+        route_after_patch_form,
+        {"plan": "plan", "confirm_form": "confirm_form", "end": END},
     )
 
     builder.add_conditional_edges(

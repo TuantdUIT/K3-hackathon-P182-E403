@@ -50,3 +50,85 @@
 .copilotKitPopup {
   z-index: 120;
 }
+
+/* --------------------------------------------------------------------------
+   `.chat-dock` — khung chat NHÚNG trong trang (modal thêm khách, tab định giá),
+   khác với popup ở trang khách. Popup giữ nguyên style gốc của CopilotKit.
+
+   Phần chung: ô nhập trông như một thẻ nổi (bo tròn, đổ bóng). Chỗ ĐẶT ô nhập
+   thì tuỳ biến thể:
+
+     `.is-pinned`  ghim đáy khung, đè lên tin nhắn — dùng khi khung chat cao
+                   bằng màn hình và người dùng cần ô nhập luôn ở một chỗ.
+     `.is-snug`    nằm ngay dưới tin nhắn cuối — dùng khi khung chat cao mà hội
+                   thoại còn ngắn, để ô nhập không bị đẩy xuống tận đáy.
+   -------------------------------------------------------------------------- */
+.chat-dock .copilotKitChat {
+  position: relative;
+  height: 100%;
+}
+
+.chat-dock .copilotKitInput {
+  pointer-events: auto;
+  width: 100%;
+  min-height: 56px;
+  margin: 0;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 12px 28px -12px rgb(15 23 42 / 45%);
+}
+
+/* --- Biến thể 1: ghim đáy, đè lên tin nhắn ------------------------------- */
+
+/* Chừa chỗ đúng bằng chiều cao ô nhập — thiếu dòng này thì tin nhắn cuối cùng
+   nằm khuất sau ô nhập và không cuộn tới được. */
+.chat-dock.is-pinned .copilotKitMessages {
+  padding-bottom: 92px;
+}
+
+.chat-dock.is-pinned .copilotKitInputContainer {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 12px 14px 14px;
+  background: linear-gradient(to top, #fff 55%, rgb(255 255 255 / 0%));
+
+  /* BẮT BUỘC phải có z-index. `.copilotKitMessages` là flex item mang
+     `z-index: 1` — theo spec, z-index CÓ tác dụng lên flex item kể cả khi
+     `position: static`, nên nó tạo stacking context và vẽ đè lên ô nhập vừa
+     bị tách khỏi luồng. Thiếu dòng này thì ô nhập vẫn tồn tại và vẫn gõ được
+     bằng bàn phím, chỉ là nằm khuất sau nền trắng đục của khung tin nhắn. */
+  z-index: 2;
+
+  /* Dải gradient chỉ để làm mờ tin nhắn phía sau. Không cho nó nhận sự kiện
+     chuột, nếu không cả vùng trong suốt phía trên ô nhập sẽ nuốt click. */
+  pointer-events: none;
+}
+
+/* --- Biến thể 2: bám sát tin nhắn cuối ----------------------------------- */
+
+/* Mặc định CopilotKit cho khung tin nhắn `flex: 1`, nên nó nuốt hết chiều cao
+   còn trống và đẩy ô nhập xuống tận đáy — hội thoại mới có 1 câu chào mà ô nhập
+   đã nằm cách đó cả màn hình. `flex: 0 1 auto` cho khung tin nhắn cao đúng bằng
+   nội dung, ô nhập bám ngay dưới. Khi hội thoại dài ra, khung mới co lại và tự
+   cuộn, ô nhập lúc đó nằm ở đáy như bình thường. */
+.chat-dock.is-snug .copilotKitMessages {
+  flex: 0 1 auto;
+  justify-content: flex-start;
+  /* Gốc là `scroll` -> luôn hiện rãnh cuộn kể cả khi không có gì để cuộn. */
+  overflow-y: auto;
+}
+
+.chat-dock.is-snug .copilotKitInputContainer {
+  padding: 4px 14px 14px;
+  background: transparent;
+}
+
+/* --- Khoá ô nhập khi có thẻ HITL chờ trả lời ----------------------------- */
+
+/* Chỉ vô hiệu hoá Ô NHẬP, tuyệt đối không phủ cả khung: thẻ HITL nằm NGAY
+   TRONG danh sách tin nhắn, che khung là che mất đúng cái đang bắt trả lời. */
+.chat-dock.is-locked .copilotKitInputContainer {
+  opacity: 0.45;
+  pointer-events: none;
+  filter: grayscale(1);
+}

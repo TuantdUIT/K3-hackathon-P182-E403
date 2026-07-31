@@ -7,6 +7,10 @@ import { MousePointer2, TextCursorInput } from 'lucide-react';
  * khách. z-200 nằm trên cả modal (z-100) và chat popup (z-120).
  * Việc di chuyển do `transition transform 500ms` lo, khớp với `sleep(500)` trong
  * `move_to()` — cursor tới đích rồi mới bắt đầu gõ.
+ *
+ * Ngoại lệ là `cursor.snap`: khi trang cuộn dưới chân con trỏ, hook đo lại toạ
+ * độ để nó dính lấy ô. Chuyển động đó phải tức thì — nội suy 500ms sẽ thành ra
+ * con trỏ lững lờ đuổi theo ô, đúng thứ ta muốn tránh.
  */
 export default function AgentCursor({ cursor }) {
   if (!cursor?.visible) return null;
@@ -15,7 +19,9 @@ export default function AgentCursor({ cursor }) {
 
   return (
     <div
-      className="pointer-events-none fixed left-0 top-0 z-200 transition-transform duration-500 ease-out"
+      className={`pointer-events-none fixed left-0 top-0 z-200 ${
+        cursor.snap ? '' : 'transition-transform duration-500 ease-out'
+      }`}
       style={{ transform: `translate3d(${cursor.x}px, ${cursor.y}px, 0)` }}
       aria-hidden="true"
     >

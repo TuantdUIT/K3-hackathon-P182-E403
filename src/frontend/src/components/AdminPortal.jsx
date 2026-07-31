@@ -8,6 +8,8 @@ import {
   LogOut,
   Mail,
   MapPin,
+  PanelLeftClose,
+  PanelLeftOpen,
   Phone,
   RefreshCw,
   Search,
@@ -20,6 +22,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { find_vehicle } from '../data/vehicles.js';
 import { fetch_customers, login, update_customer_status } from '../lib/api.js';
 import { format_date_long, format_datetime } from '../lib/formatDate.js';
+import { link_handler, useNavigation } from '../lib/navigation.jsx';
 import useAgentActionRunner from '../lib/useAgentActionRunner.js';
 import useAgentCursor from '../lib/useAgentCursor.js';
 import AddCustomerModal from './AddCustomerModal.jsx';
@@ -27,11 +30,9 @@ import AgentApprovalCard from './AgentApprovalCard.jsx';
 import AgentCursor from './AgentCursor.jsx';
 import AppraisalBoard from './AppraisalBoard.jsx';
 
-// Mỗi tab là một ĐƯỜNG DẪN RIÊNG, chuyển tab bằng full page load chứ không phải
-// state trong React. Lý do: `CopilotKit` ở `main.jsx` chọn agent theo
-// `window.location.pathname` và chỉ có MỘT agent hoạt động mỗi lần mount. Đổi
-// tab bằng state thì khung chat vẫn dính agent của tab cũ.
-// Phiên đăng nhập nằm ở `sessionStorage` nên reload không bắt đăng nhập lại.
+// Mỗi tab là một ĐƯỜNG DẪN RIÊNG (để share link được và back/forward chạy đúng),
+// nhưng chuyển tab đi qua router ở `lib/navigation.jsx` — `pushState` chứ không
+// tải lại trang. `main.jsx` đọc đường dẫn đó để chọn agent tương ứng.
 export const TABS = [
   { key: 'customers', path: '/admin-portal', label: 'Khách đăng ký lái thử', icon: LayoutDashboard },
   { key: 'appraisal', path: '/admin-portal/dinh-gia', label: 'Định giá xe cũ', icon: Car },
@@ -60,7 +61,42 @@ const status_styles = {
 
 const SESSION_KEY = 'vinfast_admin_staff';
 
+// Trạng thái thu gọn sidebar. Phải là `localStorage`, KHÔNG phải state React:
+// mỗi tab là một full page load riêng (xem chú thích ở `TABS`), nên state trong
+// component sẽ bị dựng lại từ đầu mỗi lần đổi tab và sidebar tự bung ra.
+const SIDEBAR_KEY = 'vinfast_crm_sidebar_collapsed';
+
+function read_sidebar_collapsed() {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) === '1';
+  } catch {
+    // Trình duyệt chặn storage (chế độ riêng tư) thì mặc định mở — thà hiện thừa
+    // còn hơn giấu mất điều hướng mà người dùng không biết cách gọi lại.
+    return false;
+  }
+}
+
+function useSidebarCollapsed() {
+  const [collapsed, set_collapsed] = useState(read_sidebar_collapsed);
+
+  const toggle = useCallback(() => {
+    set_collapsed((previous) => {
+      const next = !previous;
+      try {
+        localStorage.setItem(SIDEBAR_KEY, next ? '1' : '0');
+      } catch {
+        // Không ghi được thì vẫn đổi trong phiên hiện tại.
+      }
+      return next;
+    });
+  }, []);
+
+  return [collapsed, toggle];
+}
+
 export default function AdminPortal() {
+  const { path } = useNavigation();
+
   const [staff, set_staff] = useState(() => {
     try {
       const raw = sessionStorage.getItem(SESSION_KEY);
@@ -82,7 +118,7 @@ export default function AdminPortal() {
 
   if (!staff) return <LoginScreen on_logged_in={on_logged_in} />;
 
-  if (window.location.pathname.startsWith('/admin-portal/dinh-gia')) {
+  if (path.startsWith('/admin-portal/dinh-gia')) {
     return (
       <Shell staff={staff} on_logout={on_logout} active="appraisal" title="Định giá xe cũ"
         subtitle={`Xin chào ${staff.name} — nghiệp vụ đổi xe cũ lấy xe điện VinFast.`}>
@@ -98,14 +134,47 @@ export default function AdminPortal() {
  * Khung chung của CRM: sidebar điều hướng + thẻ nhân viên, phần thân do tab tự lo.
  */
 function Shell({ staff, on_logout, active, title, subtitle, actions, children }) {
+  const [collapsed, toggle_sidebar] = useSidebarCollapsed();
+  const { navigate } = useNavigation();
+
   return (
     <div className="flex min-h-screen bg-slate-100">
-      <aside className="hidden w-60 shrink-0 flex-col bg-ink-900 p-5 text-slate-300 lg:flex">
-        <div className="flex items-center gap-2.5 text-white">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-600">
+      {/* Thu gọn thành dải icon chứ KHÔNG ẩn hẳn: ẩn hẳn thì không còn chỗ nào
+          bấm để gọi lại, và người dùng mất luôn đường sang tab khác. Tab định
+          giá có 3 cột nên 192px lấy lại được là đáng kể.
+
+          `sticky top-0 h-screen`: ghim sidebar khi lướt. `h-screen` là bắt buộc
+          — flex item mặc định bị kéo cao bằng cả hàng (`align-self: stretch`),
+          mà một phần tử cao đúng bằng vùng cuộn thì không còn khoảng nào để
+          "dính", sticky sẽ im lặng không có tác dụng. Chiều cao tường minh ghi
+          đè stretch và trả lại khoảng đó. */}
+      <aside
+        className={`sticky top-0 hidden h-screen shrink-0 flex-col overflow-y-auto bg-ink-900 py-5 text-slate-300 transition-[width] duration-200 lg:flex ${
+          collapsed ? 'w-[68px] px-3' : 'w-60 px-5'
+        }`}
+      >
+        <div className={`flex items-center ${collapsed ? 'flex-col gap-3' : 'gap-2.5'}`}>
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-600 text-white">
             <BatteryCharging className="h-5 w-5" />
           </span>
-          <span className="font-extrabold">VinFast CRM</span>
+          {!collapsed && <span className="font-extrabold text-white">VinFast CRM</span>}
+
+          <button
+            type="button"
+            onClick={toggle_sidebar}
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng'}
+            title={collapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng'}
+            className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-white/10 hover:text-white ${
+              collapsed ? '' : 'ml-auto'
+            }`}
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="h-4 w-4" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" />
+            )}
+          </button>
         </div>
 
         <nav className="mt-8 space-y-1 text-sm">
@@ -116,40 +185,57 @@ function Shell({ staff, on_logout, active, title, subtitle, actions, children })
               <a
                 key={tab.key}
                 href={tab.path}
-                className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 transition ${
+                onClick={link_handler(navigate, tab.path)}
+                // Lúc thu gọn, nhãn biến mất nên `title` là thứ DUY NHẤT cho
+                // biết tab nào là tab nào.
+                title={collapsed ? tab.label : undefined}
+                className={`flex items-center rounded-xl py-2.5 transition ${
+                  collapsed ? 'justify-center px-0' : 'gap-2.5 px-3'
+                } ${
                   current
                     ? 'bg-white/10 font-semibold text-white'
                     : 'text-slate-400 hover:bg-white/5 hover:text-white'
                 }`}
               >
-                <Icon className="h-4 w-4" />
-                {tab.label}
+                <Icon className="h-4 w-4 shrink-0" />
+                {!collapsed && tab.label}
               </a>
             );
           })}
-          <span className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-slate-500">
-            <Users className="h-4 w-4" />
-            Nhân viên kinh doanh
+          <span
+            title={collapsed ? 'Nhân viên kinh doanh' : undefined}
+            className={`flex items-center rounded-xl py-2.5 text-slate-500 ${
+              collapsed ? 'justify-center px-0' : 'gap-2.5 px-3'
+            }`}
+          >
+            <Users className="h-4 w-4 shrink-0" />
+            {!collapsed && 'Nhân viên kinh doanh'}
           </span>
         </nav>
 
-        <div className="mt-auto rounded-2xl bg-white/5 p-4">
-          <div className="flex items-center gap-2.5">
-            <span className="grid h-9 w-9 place-items-center rounded-full bg-brand-500 text-sm font-bold text-white">
+        <div className={`mt-auto rounded-2xl bg-white/5 ${collapsed ? 'p-2' : 'p-4'}`}>
+          <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2.5'}`}>
+            <span
+              title={collapsed ? `${staff.name} · ${staff.email}` : undefined}
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-brand-500 text-sm font-bold text-white"
+            >
               {staff.initials}
             </span>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-white">{staff.name}</div>
-              <div className="truncate text-xs text-slate-400">{staff.email}</div>
-            </div>
+            {!collapsed && (
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-white">{staff.name}</div>
+                <div className="truncate text-xs text-slate-400">{staff.email}</div>
+              </div>
+            )}
           </div>
           <button
             type="button"
             onClick={on_logout}
-            className="mt-3.5 flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
+            title="Đăng xuất"
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
           >
-            <LogOut className="h-4 w-4" />
-            Đăng xuất
+            <LogOut className="h-4 w-4 shrink-0" />
+            {!collapsed && 'Đăng xuất'}
           </button>
         </div>
       </aside>
@@ -175,6 +261,7 @@ function Shell({ staff, on_logout, active, title, subtitle, actions, children })
             <a
               key={tab.key}
               href={tab.path}
+              onClick={link_handler(navigate, tab.path)}
               className={`rounded-xl px-3.5 py-2 text-sm font-semibold transition ${
                 tab.key === active
                   ? 'bg-brand-600 text-white'
