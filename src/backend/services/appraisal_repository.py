@@ -9,7 +9,7 @@ Mọi hàm tính toán ở đây là hàm THUẦN theo nghĩa không gọi LLM: 
 không có API key, và test không cần mock gì.
 """
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -290,7 +290,7 @@ def create_appraisal(
     appraisal.total_score_pct = score_pct
     appraisal.value_a = compute_value_a(price_row.market_price, score_pct, repair_cost)
     appraisal.status = "appraised"
-    appraisal.sla_due_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(
+    appraisal.sla_due_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
         hours=rules.SMART_SOLUTION_SLA_HOURS
     )
 
