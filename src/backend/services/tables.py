@@ -1,6 +1,6 @@
 """Định nghĩa bảng SQLAlchemy 2.0."""
 
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -72,7 +72,7 @@ class Customer(Base):
     sales_staff: Mapped[SalesStaff | None] = relationship(back_populates="customers")
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
 
@@ -158,7 +158,7 @@ class TradeInAppraisal(Base):
     checklist_done: Mapped[str] = mapped_column(String(120), nullable=False, default="")
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
     scores: Mapped[list["AppraisalScore"]] = relationship(
@@ -230,7 +230,7 @@ class TradeInQuote(Base):
     handover_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=lambda: datetime.now(UTC)
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
 
